@@ -50,6 +50,11 @@ FUTURE.md
 CODEGRAPH-SPEC.html
 MCP-API-REFERENCE.html
 .claude/PROJEKT-EINSTIEG.md
+futureWork.md
+PLAN-*.md
+REVIEW-*.md
+RELEASE-NOTES-*.md
+*.pdf
 
 # Internal scripts
 aidex-init-all.bat
