@@ -13,7 +13,7 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { exec } from 'child_process';
 import path from 'path';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import chokidar, { FSWatcher } from 'chokidar';
 import { openDatabase, createQueries } from '../db/index.js';
 import { update as updateIndex } from '../commands/update.js';
@@ -83,13 +83,18 @@ export async function startViewer(projectPath: string): Promise<string> {
 
     // Git status - fetch once at startup, refresh on file changes
     let cachedGitInfo: GitStatusInfo | undefined;
-    const refreshGitStatus = async () => {
+    let lastGitRefresh = 0;
+    const GIT_REFRESH_INTERVAL = 5000; // ms — avoid hammering git on rapid file changes
+    const refreshGitStatus = async (force = false) => {
+        const now = Date.now();
+        if (!force && now - lastGitRefresh < GIT_REFRESH_INTERVAL) return;
+        lastGitRefresh = now;
         cachedGitInfo = await getGitStatus(projectPath);
         console.error('[Viewer] Git status:', cachedGitInfo.isGitRepo ? 'repo' : 'no-repo',
             cachedGitInfo.hasRemote ? 'with-remote' : 'no-remote',
             cachedGitInfo.fileStatuses.size, 'files with status');
     };
-    await refreshGitStatus();
+    await refreshGitStatus(true); // force on startup
 
     const app = express();
     server = createServer(app);
@@ -538,6 +543,8 @@ async function getFileSignature(db: Database.Database, filePath: string): Promis
     };
 }
 
+const FILE_SIZE_LIMIT = 1 * 1024 * 1024; // 1 MB
+
 /**
  * Get file content for the Code tab
  */
@@ -555,6 +562,10 @@ function getFileContent(projectRoot: string, filePath: string): { content: strin
     }
 
     try {
+        const { size } = statSync(fullPath);
+        if (size > FILE_SIZE_LIMIT) {
+            return { error: `File too large (${(size / 1024).toFixed(0)} KB). Limit is 1 MB.` };
+        }
         const content = readFileSync(fullPath, 'utf-8');
         const language = getLanguageFromExtension(filePath);
         return { content, language };

@@ -71,8 +71,10 @@ const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
 // ============================================================
 
 const RELEASE_HIGHLIGHTS: string[] = [
-    'Screenshot optimization: new `scale` and `colors` parameters reduce file size up to 95%',
-    'LLM-optimized: scale=0.5 + colors=2 turns a 100 KB screenshot into ~5 KB (black & white, half size)',
+    'New tool: aidex_global_guideline — store AI guidelines and coding conventions in global.db',
+    'Security fixes: command injection, SQL injection, WebSocket validation, path whitelisting',
+    'Viewer fixes: N+1 queries eliminated, race condition fixed, 1 MB file size limit added',
+    'Refactored: hasTool/runPowerShell/normalizePath/escapeLikeTerm centralized — no more duplicates',
     'AI strategy: tool description guides assistants to start aggressive, retry if unreadable, remember per app',
 ];
 

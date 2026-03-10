@@ -4,17 +4,29 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-03-10
+
 ### Added
-- **`aidex_global_guideline`**: New tool — persistent key-value store in `~/.aidex/global.db` for AI guidelines and coding conventions. Store named instructions like "review" → review checklist, "release-prep" → release steps. Actions: `set`, `get`, `list`, `delete`. Works without prior `global_init`.
+- **`aidex_global_guideline`**: New tool (#28) — persistent key-value store in `~/.aidex/global.db` for AI guidelines and coding conventions. Store named instructions like "review" → review checklist, "release-prep" → release steps. Actions: `set`, `get`, `list`, `delete`. Works without prior `global_init`.
+- **Viewer file size limit**: `getFileContent()` now refuses files larger than 1 MB — prevents browser from freezing on large binary or generated files
 
 ### Fixed
+- **Command injection in Linux screenshot tools**: All `execSync` calls with shell string interpolation replaced with `execFileSync` using argument arrays — window titles, file paths and IDs are no longer injectable via shell
+- **Global query cache grows unbounded**: Cache entries are now evicted on write when they exceed the 5-minute TTL — prevents memory leak in long-running sessions
+- **Viewer race condition on file change**: `pendingChanges` set is now snapshotted and cleared before processing — new events arriving during async re-indexing are no longer silently dropped
+- **Viewer buildTree() N+1 queries**: Correlated subqueries for `methods` and `types` counts replaced with `LEFT JOIN` — single query instead of one subquery per file
+- **WebSocket unknown message type**: Viewer now sends an error response for unrecognized message types instead of silently ignoring them
+- **Viewer taskId not validated**: `updateTaskStatus` now checks `Number.isInteger(taskId)` before processing
+- **Viewer mode not whitelisted**: `getTree` message mode is now constrained to `'code' | 'all'` — arbitrary values no longer passed through
+- **`getProjects()` SQL injection via tag/namePattern**: `escapeLikeTerm()` now applied to both filter parameters in `global-database.ts`
+- **Silent fails in viewer and global DB**: `catch {}` blocks now log errors via `console.error`
+- **Git status refresh on every file event**: Added 5-second minimum interval between git status refreshes — reduces git subprocess spam during rapid file saves
 - **Global query cache not invalidated after init/update**: `aidex_init` and `aidex_update` now call `invalidateGlobalCache()` so global searches immediately see fresh data
-- **Command injection in macOS/Linux screenshot post-processing**: Replaced `execSync` with shell string interpolation with `execFileSync` using argument arrays — file paths are no longer injected into shell commands
-- **Duplicate SQL LIKE escaping**: Centralized in `escapeLike()` (db layer) and `escapeLikeTerm()` (commands layer) — removed 4 inline copies
 
 ### Refactored
-- **`normalizePath()` utility**: Added to `shared.ts` for consistent path separator normalization
-- **`escapeLikeTerm()` utility**: Added to `shared.ts` and exported — use instead of inline LIKE escaping
+- **`screenshot/shared.ts`**: New module with centralized `hasTool()` and `runPowerShell()` — both use `execFileSync` (no shell). Imported by `platform-win32.ts`, `platform-linux.ts`, and `post-process.ts` — eliminates duplicate implementations
+- **`normalizePath()`**: Private duplicates in `global-database.ts` and `git-status.ts` removed — both now import from `commands/shared.ts`
+- **`escapeLikeTerm()`**: Exported from `commands/shared.ts` and used consistently across all LIKE queries
 - **macOS sips output parsing**: Replaced shell pipe (`| tail -1 | awk`) with regex on direct `sips` output
 
 ## [1.13.0] - 2026-03-09

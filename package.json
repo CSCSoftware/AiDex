@@ -1,6 +1,6 @@
 {
   "name": "aidex-mcp",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "mcpName": "io.github.CSCSoftware/aidex",
   "description": "MCP Server for persistent code indexing. Gives AI assistants (Claude, Gemini, Copilot, Cursor) instant access to your codebase. 50x less context than grep.",
   "main": "build/index.js",
