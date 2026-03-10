@@ -38,6 +38,7 @@ Complete reference for all AiDex MCP tools.
   - [aidex_global_query](#aidex_global_query)
   - [aidex_global_signatures](#aidex_global_signatures)
   - [aidex_global_refresh](#aidex_global_refresh)
+  - [aidex_global_guideline](#aidex_global_guideline)
 - [Screenshots](#screenshots)
   - [aidex_screenshot](#aidex_screenshot)
   - [aidex_windows](#aidex_windows)
@@ -853,6 +854,33 @@ Update statistics for all registered projects and remove projects whose paths no
 ```
 
 **Returns:** Count of updated and removed projects, plus updated totals.
+
+---
+
+### aidex_global_guideline
+
+Store, retrieve, list, or delete persistent AI guidelines and coding conventions. Stored in `~/.aidex/global.db` — available across all projects without requiring `aidex_init`. Perfect for team coding conventions, review checklists, and reusable AI instructions.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `action` | string | Yes | `set`, `get`, `list`, or `delete` |
+| `key` | string | for set/get/delete | Guideline name (e.g., `"review"`, `"style"`, `"release"`) |
+| `value` | string | for set | The guideline content to store |
+| `filter` | string | No | Substring filter for `list` action |
+
+**Examples:**
+```json
+{ "action": "set", "key": "review", "value": "Check: error handling, null safety, no magic strings, consistent naming" }
+{ "action": "set", "key": "style", "value": "PascalCase classes, camelCase methods, 4-space indent, XML docs on public APIs" }
+{ "action": "get", "key": "review" }
+{ "action": "list" }
+{ "action": "list", "filter": "code" }
+{ "action": "delete", "key": "old-rule" }
+```
+
+**Returns:** For `get` — key, value, created/updated timestamps. For `list` — all matching guidelines. For `set`/`delete` — confirmation message.
 
 ---
 

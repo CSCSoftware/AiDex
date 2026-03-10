@@ -102,6 +102,8 @@ Do I want to search code?
 | "Have I ever written X?" | \`aidex_global_query term="X" mode="contains"\` |
 | "Which project has class Y?" | \`aidex_global_signatures term="Y" kind="class"\` |
 | "All indexed projects?" | \`aidex_global_status\` |
+| "Store coding convention" | \`aidex_global_guideline action="set"\` |
+| "Load review checklist" | \`aidex_global_guideline action="get"\` |
 
 ### Search Modes
 
@@ -109,7 +111,7 @@ Do I want to search code?
 - **\`contains\`**: Finds identifiers containing the term — \`render\` matches \`preRenderSetup\`
 - **\`starts_with\`**: Finds identifiers starting with the term — \`Update\` matches \`UpdatePlayer\`, \`UpdateUI\`
 
-### All Tools (27)
+### All Tools (28)
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
@@ -118,6 +120,7 @@ Do I want to search code?
 | Overview | \`aidex_summary\`, \`aidex_tree\`, \`aidex_describe\`, \`aidex_files\` | Entry points, file tree, file listing by type |
 | Cross-Project | \`aidex_link\`, \`aidex_unlink\`, \`aidex_links\`, \`aidex_scan\` | Link dependencies, discover projects |
 | Global Search | \`aidex_global_init\`, \`aidex_global_query\`, \`aidex_global_signatures\`, \`aidex_global_status\`, \`aidex_global_refresh\` | Search across ALL projects |
+| Guidelines | \`aidex_global_guideline\` | Persistent AI instructions & conventions (key-value, global) |
 | Sessions | \`aidex_session\`, \`aidex_note\` | Track sessions, leave notes (with searchable history) |
 | Tasks | \`aidex_task\`, \`aidex_tasks\` | Built-in backlog with priorities, tags, auto-logged history |
 | Screenshots | \`aidex_screenshot\`, \`aidex_windows\` | Cross-platform screen capture (no index needed) |

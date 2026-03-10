@@ -409,6 +409,7 @@ aidex_init({ path: "/path/to/your/project" })
 | `aidex_global_query` | Search terms across ALL registered projects |
 | `aidex_global_signatures` | Search methods/types by name across all projects |
 | `aidex_global_refresh` | Update stats and remove stale projects from global DB |
+| `aidex_global_guideline` | Store/retrieve AI guidelines and coding conventions (key-value, global) |
 
 ## Time-based Filtering
 
@@ -530,6 +531,27 @@ aidex_global_status()                                                  # List al
 aidex_global_status({ sort: "recent" })                                # Most recently indexed first
 aidex_global_refresh()                                                 # Update stats, remove stale
 ```
+
+## AI Guidelines
+
+Store persistent coding conventions, review checklists, and AI instructions in a single place — shared across all projects.
+
+```
+aidex_global_guideline({ action: "set", key: "review", value: "Always check: error handling, null safety, no hardcoded strings" })
+aidex_global_guideline({ action: "set", key: "style", value: "Use PascalCase for classes, camelCase for methods, 4-space indent" })
+aidex_global_guideline({ action: "get", key: "review" })               # Retrieve a guideline
+aidex_global_guideline({ action: "list" })                             # Show all guidelines
+aidex_global_guideline({ action: "list", filter: "code" })             # Filter by name
+aidex_global_guideline({ action: "delete", key: "old-rule" })          # Remove a guideline
+```
+
+**Use cases:**
+- **Code review checklist**: Tell your AI exactly what to look for every time
+- **Coding conventions**: Store team style rules once, reference them in any project
+- **Release checklist**: Step-by-step process for shipping
+- **Project-agnostic instructions**: No more pasting the same context into every session
+
+Guidelines are stored in `~/.aidex/global.db` — available across all your projects without `aidex_init`. Ask your AI: *"Load the review guideline and apply it to this file."*
 
 ## Screenshots — LLM-Optimized
 
