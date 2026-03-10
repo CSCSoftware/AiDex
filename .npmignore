@@ -24,6 +24,12 @@ docs/*.png
 .*_token
 futureWork.md
 
+# Internal planning/review docs
+PLAN-*.md
+REVIEW-*.md
+RELEASE-NOTES-*.md
+AiDex_Article_English.pdf
+
 # Scripts
 *.bat
 
