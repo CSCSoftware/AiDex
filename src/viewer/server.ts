@@ -102,10 +102,13 @@ export async function startViewer(projectPath: string): Promise<string> {
     const broadcastTreeUpdate = async () => {
         if (!wss) return;
 
-        // Re-index changed files before refreshing the tree
+        // Re-index changed files before refreshing the tree.
+        // Snapshot + clear first so new events during async processing aren't lost.
         if (pendingChanges.size > 0) {
-            console.error('[Viewer] Re-indexing', pendingChanges.size, 'changed file(s)');
-            for (const changedFile of pendingChanges) {
+            const snapshot = new Set(pendingChanges);
+            pendingChanges.clear();
+            console.error('[Viewer] Re-indexing', snapshot.size, 'changed file(s)');
+            for (const changedFile of snapshot) {
                 // Convert absolute path to relative path
                 const relativePath = path.relative(projectRoot, changedFile).replace(/\\/g, '/');
                 try {
@@ -118,7 +121,6 @@ export async function startViewer(projectPath: string): Promise<string> {
                     console.error('[Viewer] Failed to re-index:', relativePath, err);
                 }
             }
-            pendingChanges.clear();
         }
 
         // Refresh git status on file changes
@@ -201,7 +203,7 @@ export async function startViewer(projectPath: string): Promise<string> {
                 const msg: ViewerMessage = JSON.parse(data.toString());
 
                 if (msg.type === 'getTree') {
-                    const mode = msg.mode || 'code';
+                    const mode: 'code' | 'all' = msg.mode === 'all' ? 'all' : 'code';
                     const freshDb = openDatabase(dbPath, true);
                     const tree = await buildTree(freshDb.getDb(), projectPath, mode, viewerSessionChanges, cachedGitInfo);
                     freshDb.close();
@@ -223,7 +225,7 @@ export async function startViewer(projectPath: string): Promise<string> {
                     freshDb.close();
                     ws.send(JSON.stringify({ type: 'tasks', data: taskData }));
                 }
-                else if (msg.type === 'updateTaskStatus' && msg.taskId && msg.status) {
+                else if (msg.type === 'updateTaskStatus' && Number.isInteger(msg.taskId) && msg.status) {
                     const taskData = updateTaskStatus(msg.taskId as number, msg.status as string);
                     if (taskData) {
                         // Broadcast updated task list to all clients
@@ -233,6 +235,9 @@ export async function startViewer(projectPath: string): Promise<string> {
                             }
                         });
                     }
+                }
+                else {
+                    ws.send(JSON.stringify({ type: 'error', message: `Unknown message type: ${msg.type}` }));
                 }
             } catch (err) {
                 console.error('[Viewer] Error:', err);
@@ -367,8 +372,8 @@ function detectSessionChanges(db: Database.Database): SessionChangeInfo {
             // For now, mark all recently indexed files as "modified"
             changes.modified.add(file.path);
         }
-    } catch {
-        // Silently fail
+    } catch (err) {
+        console.error('[Viewer] Failed to detect session changes:', err);
     }
 
     return changes;
@@ -388,11 +393,12 @@ async function buildTree(
         files = db.prepare(`
             SELECT f.path,
                    COUNT(DISTINCT o.item_id) as items,
-                   (SELECT COUNT(*) FROM methods m WHERE m.file_id = f.id) as methods,
-                   (SELECT COUNT(*) FROM types t WHERE t.file_id = f.id) as types
+                   COUNT(DISTINCT m.id) as methods,
+                   COUNT(DISTINCT t.id) as types
             FROM files f
-            LEFT JOIN lines l ON l.file_id = f.id
-            LEFT JOIN occurrences o ON o.file_id = f.id AND o.line_id = l.id
+            LEFT JOIN occurrences o ON o.file_id = f.id
+            LEFT JOIN methods m ON m.file_id = f.id
+            LEFT JOIN types t ON t.file_id = f.id
             GROUP BY f.id
             ORDER BY f.path
         `).all() as Array<{ path: string; items: number; methods: number; types: number }>;
@@ -402,16 +408,17 @@ async function buildTree(
             SELECT path, type as fileType FROM project_files WHERE type != 'dir' ORDER BY path
         `).all() as Array<{ path: string; fileType: string }>;
 
-        // Get stats for indexed files
+        // Get stats for indexed files — single query with JOINs (no N+1)
         const statsMap = new Map<string, { items: number; methods: number; types: number }>();
         const indexedStats = db.prepare(`
             SELECT f.path,
                    COUNT(DISTINCT o.item_id) as items,
-                   (SELECT COUNT(*) FROM methods m WHERE m.file_id = f.id) as methods,
-                   (SELECT COUNT(*) FROM types t WHERE t.file_id = f.id) as types
+                   COUNT(DISTINCT m.id) as methods,
+                   COUNT(DISTINCT t.id) as types
             FROM files f
-            LEFT JOIN lines l ON l.file_id = f.id
-            LEFT JOIN occurrences o ON o.file_id = f.id AND o.line_id = l.id
+            LEFT JOIN occurrences o ON o.file_id = f.id
+            LEFT JOIN methods m ON m.file_id = f.id
+            LEFT JOIN types t ON t.file_id = f.id
             GROUP BY f.id
         `).all() as Array<{ path: string; items: number; methods: number; types: number }>;
 

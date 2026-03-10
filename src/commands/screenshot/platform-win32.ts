@@ -7,28 +7,10 @@
  * v1.9.0
  */
 
-import { execSync } from 'child_process';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { writeFileSync, unlinkSync } from 'fs';
 import type { PlatformScreenshot, WindowInfo } from './types.js';
+import { runPowerShell } from './shared.js';
 
-// ============================================================
-// PowerShell Execution Helper
-// ============================================================
-
-function runPowerShell(script: string, timeoutMs = 30000): string {
-    const tmpPs1 = join(tmpdir(), `aidex-capture-${Date.now()}.ps1`);
-    writeFileSync(tmpPs1, script, 'utf8');
-    try {
-        return execSync(
-            `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${tmpPs1}"`,
-            { encoding: 'utf8', timeout: timeoutMs, stdio: ['pipe', 'pipe', 'pipe'] }
-        ).trim();
-    } finally {
-        try { unlinkSync(tmpPs1); } catch { /* ignore */ }
-    }
-}
+// runPowerShell is imported from shared.ts (avoids duplication with post-process.ts)
 
 // ============================================================
 // PowerShell Scripts

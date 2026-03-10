@@ -10,6 +10,7 @@
 
 import { simpleGit, SimpleGit, StatusResult } from 'simple-git';
 import path from 'path';
+import { normalizePath } from '../commands/shared.js';
 
 // ============================================================
 // Types
@@ -56,14 +57,14 @@ export async function getGitStatus(projectPath: string): Promise<GitStatusInfo> 
 
     try {
         // Determine git repo root and compute prefix for subfolder projects
-        const gitRoot = normalizePathSeparators((await git.revparse(['--show-toplevel'])).trim());
-        const absProject = normalizePathSeparators(path.resolve(projectPath));
+        const gitRoot = normalizePath((await git.revparse(['--show-toplevel'])).trim());
+        const absProject = normalizePath(path.resolve(projectPath));
         const prefix = absProject === gitRoot ? '' : absProject.slice(gitRoot.length + 1) + '/';
 
         // Helper: convert git-root-relative path to project-relative path
         // Returns null if the file is outside this project subfolder
         const toProjectRelative = (gitRelPath: string): string | null => {
-            const normalized = normalizePathSeparators(gitRelPath);
+            const normalized = normalizePath(gitRelPath);
             if (!prefix) return normalized;
             if (normalized.startsWith(prefix)) return normalized.slice(prefix.length);
             return null; // file outside this project
@@ -172,9 +173,3 @@ export async function getGitStatus(projectPath: string): Promise<GitStatusInfo> 
     }
 }
 
-/**
- * Normalize path separators to forward slashes (for consistency)
- */
-function normalizePathSeparators(filePath: string): string {
-    return filePath.replace(/\\/g, '/');
-}

@@ -7,25 +7,13 @@
  * v1.9.0
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import type { PlatformScreenshot, WindowInfo } from './types.js';
+import { hasTool } from './shared.js';
 
 // ============================================================
 // Tool Detection
 // ============================================================
-
-function hasTool(name: string): boolean {
-    try {
-        execSync(`command -v ${name}`, {
-            encoding: 'utf8',
-            timeout: 5000,
-            stdio: ['pipe', 'pipe', 'pipe'],
-        });
-        return true;
-    } catch {
-        return false;
-    }
-}
 
 function requireTool(primary: string, fallback?: string): string {
     if (hasTool(primary)) return primary;
@@ -47,7 +35,7 @@ export const linuxPlatform: PlatformScreenshot = {
             if (monitor !== undefined) {
                 // Get monitor geometry via xrandr
                 try {
-                    const xrandrOutput = execSync('xrandr --query', {
+                    const xrandrOutput = execFileSync('xrandr', ['--query'], {
                         encoding: 'utf8',
                         timeout: 5000,
                         stdio: ['pipe', 'pipe', 'pipe'],
@@ -63,7 +51,7 @@ export const linuxPlatform: PlatformScreenshot = {
 
                     if (monitor < monitors.length && monitors[monitor]) {
                         const m = monitors[monitor]!;
-                        execSync(`maim -g ${m.w}x${m.h}+${m.x}+${m.y} "${filePath}"`, {
+                        execFileSync('maim', ['-g', `${m.w}x${m.h}+${m.x}+${m.y}`, filePath], {
                             timeout: 10000,
                             stdio: ['pipe', 'pipe', 'pipe'],
                         });
@@ -71,12 +59,12 @@ export const linuxPlatform: PlatformScreenshot = {
                     }
                 } catch { /* fall through to default capture */ }
             }
-            execSync(`maim "${filePath}"`, {
+            execFileSync('maim', [filePath], {
                 timeout: 10000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
         } else {
-            execSync(`scrot "${filePath}"`, {
+            execFileSync('scrot', [filePath], {
                 timeout: 10000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
@@ -87,17 +75,17 @@ export const linuxPlatform: PlatformScreenshot = {
         const tool = requireTool('maim', 'scrot');
         if (tool === 'maim') {
             requireTool('xdotool');
-            const windowId = execSync('xdotool getactivewindow', {
+            const windowId = execFileSync('xdotool', ['getactivewindow'], {
                 encoding: 'utf8',
                 timeout: 5000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             }).trim();
-            execSync(`maim -i ${windowId} "${filePath}"`, {
+            execFileSync('maim', ['-i', windowId, filePath], {
                 timeout: 10000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
         } else {
-            execSync(`scrot -u "${filePath}"`, {
+            execFileSync('scrot', ['-u', filePath], {
                 timeout: 10000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
@@ -108,15 +96,14 @@ export const linuxPlatform: PlatformScreenshot = {
         requireTool('xdotool');
         const tool = requireTool('maim', 'scrot');
 
-        const escapedTitle = windowTitle.replace(/"/g, '\\"');
         let windowId: string;
         try {
-            windowId = execSync(`xdotool search --name "${escapedTitle}" | head -1`, {
+            // Use execFileSync to avoid shell injection — pass title as argument
+            windowId = execFileSync('xdotool', ['search', '--name', windowTitle], {
                 encoding: 'utf8',
                 timeout: 5000,
-                shell: '/bin/bash',
                 stdio: ['pipe', 'pipe', 'pipe'],
-            }).trim();
+            }).trim().split('\n')[0] ?? '';
         } catch {
             throw new Error(`Window not found: "${windowTitle}". Use aidex_windows to list available windows.`);
         }
@@ -126,15 +113,19 @@ export const linuxPlatform: PlatformScreenshot = {
         }
 
         if (tool === 'maim') {
-            execSync(`maim -i ${windowId} "${filePath}"`, {
+            execFileSync('maim', ['-i', windowId, filePath], {
                 timeout: 10000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
         } else {
-            // scrot can capture specific window via xdotool focus + scrot -u
-            execSync(`xdotool windowfocus ${windowId} && sleep 0.2 && scrot -u "${filePath}"`, {
+            // scrot: focus window first, then capture active window
+            execFileSync('xdotool', ['windowfocus', windowId], {
+                timeout: 5000,
+                stdio: ['pipe', 'pipe', 'pipe'],
+            });
+            execFileSync('sleep', ['0.2'], { timeout: 1000 });
+            execFileSync('scrot', ['-u', filePath], {
                 timeout: 10000,
-                shell: '/bin/bash',
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
         }
@@ -144,23 +135,23 @@ export const linuxPlatform: PlatformScreenshot = {
         const tool = requireTool('maim', 'scrot');
         if (tool === 'maim') {
             // maim -g WxH+X+Y captures a specific geometry
-            execSync(`maim -g ${width}x${height}+${x}+${y} "${filePath}"`, {
+            execFileSync('maim', ['-g', `${width}x${height}+${x}+${y}`, filePath], {
                 timeout: 10000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
         } else {
             // scrot doesn't support rect natively, capture full then crop with ImageMagick
             const tmpFile = filePath + '.tmp.png';
-            execSync(`scrot "${tmpFile}"`, {
+            execFileSync('scrot', [tmpFile], {
                 timeout: 10000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
             requireTool('convert'); // ImageMagick
-            execSync(`convert "${tmpFile}" -crop ${width}x${height}+${x}+${y} +repage "${filePath}"`, {
+            execFileSync('convert', [tmpFile, '-crop', `${width}x${height}+${x}+${y}`, '+repage', filePath], {
                 timeout: 10000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
-            try { execSync(`rm "${tmpFile}"`, { stdio: ['pipe', 'pipe', 'pipe'] }); } catch { /* ignore */ }
+            try { execFileSync('rm', [tmpFile], { stdio: ['pipe', 'pipe', 'pipe'] }); } catch { /* ignore */ }
         }
     },
 
@@ -171,12 +162,12 @@ export const linuxPlatform: PlatformScreenshot = {
             if (!hasTool('slop')) {
                 throw new Error('"slop" is required for region selection with maim. Install it: sudo apt install slop');
             }
-            execSync(`maim -s "${filePath}"`, {
+            execFileSync('maim', ['-s', filePath], {
                 timeout: 120000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
         } else {
-            execSync(`scrot -s "${filePath}"`, {
+            execFileSync('scrot', ['-s', filePath], {
                 timeout: 120000,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
@@ -185,7 +176,7 @@ export const linuxPlatform: PlatformScreenshot = {
 
     listWindows(): WindowInfo[] {
         if (hasTool('wmctrl')) {
-            const output = execSync('wmctrl -l -p', {
+            const output = execFileSync('wmctrl', ['-l', '-p'], {
                 encoding: 'utf8',
                 timeout: 5000,
                 stdio: ['pipe', 'pipe', 'pipe'],
@@ -204,7 +195,7 @@ export const linuxPlatform: PlatformScreenshot = {
         if (hasTool('xdotool')) {
             let ids: string[];
             try {
-                ids = execSync('xdotool search --name ""', {
+                ids = execFileSync('xdotool', ['search', '--name', ''], {
                     encoding: 'utf8',
                     timeout: 5000,
                     stdio: ['pipe', 'pipe', 'pipe'],
@@ -215,14 +206,14 @@ export const linuxPlatform: PlatformScreenshot = {
 
             return ids.slice(0, 50).map(id => {
                 try {
-                    const title = execSync(`xdotool getwindowname ${id}`, {
+                    const title = execFileSync('xdotool', ['getwindowname', id], {
                         encoding: 'utf8',
                         timeout: 2000,
                         stdio: ['pipe', 'pipe', 'pipe'],
                     }).trim();
                     let pid = 0;
                     try {
-                        pid = parseInt(execSync(`xdotool getwindowpid ${id}`, {
+                        pid = parseInt(execFileSync('xdotool', ['getwindowpid', id], {
                             encoding: 'utf8',
                             timeout: 2000,
                             stdio: ['pipe', 'pipe', 'pipe'],

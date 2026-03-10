@@ -11,6 +11,7 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { INDEX_DIR } from '../constants.js';
+import { escapeLikeTerm, normalizePath } from '../commands/shared.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -148,11 +149,11 @@ export class GlobalDatabase {
         const params: string[] = [];
 
         if (filter?.tag) {
-            conditions.push("tags LIKE ?");
-            params.push(`%${filter.tag}%`);
+            conditions.push("tags LIKE ? ESCAPE '\\'");
+            params.push(`%${escapeLikeTerm(filter.tag)}%`);
         }
         if (filter?.namePattern) {
-            conditions.push("name LIKE ?");
+            conditions.push("name LIKE ? ESCAPE '\\'");
             params.push(filter.namePattern.replace(/\*/g, '%'));
         }
 
@@ -247,8 +248,8 @@ export class GlobalDatabase {
                         allResults.push({ project: batch[j], results });
                         totalCount += results.length;
                     }
-                } catch {
-                    // Skip DBs with query errors
+                } catch (err) {
+                    console.error(`[GlobalDB] Query error on project ${batch[j].name}:`, err);
                 }
             }
 
@@ -344,13 +345,6 @@ export class GlobalDatabase {
 // ============================================================
 // Helpers
 // ============================================================
-
-/**
- * Normalize path to forward slashes for consistent storage
- */
-function normalizePath(p: string): string {
-    return p.replace(/\\/g, '/');
-}
 
 /**
  * Check if global.db exists

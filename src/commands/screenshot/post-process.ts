@@ -13,12 +13,10 @@
  * v1.13.0
  */
 
-import { execSync, execFileSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { statSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { writeFileSync, unlinkSync } from 'fs';
 import type { ScreenshotColors } from './types.js';
+import { hasTool, runPowerShell } from './shared.js';
 
 // ============================================================
 // Public Interface
@@ -66,19 +64,6 @@ export function postProcess(filePath: string, options: PostProcessOptions): Post
 // ============================================================
 // Windows - PowerShell + System.Drawing
 // ============================================================
-
-function runPowerShell(script: string, timeoutMs = 30000): string {
-    const tmpPs1 = join(tmpdir(), `aidex-postprocess-${Date.now()}.ps1`);
-    writeFileSync(tmpPs1, script, 'utf8');
-    try {
-        return execSync(
-            `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${tmpPs1}"`,
-            { encoding: 'utf8', timeout: timeoutMs, stdio: ['pipe', 'pipe', 'pipe'] }
-        ).trim();
-    } finally {
-        try { unlinkSync(tmpPs1); } catch { /* ignore */ }
-    }
-}
 
 function postProcessWindows(filePath: string, options: PostProcessOptions): void {
     const escapedPath = filePath.replace(/\\/g, '\\\\').replace(/'/g, "''");
@@ -143,18 +128,6 @@ $scaled.Dispose()
 // ============================================================
 // macOS - sips + convert
 // ============================================================
-
-function hasTool(name: string): boolean {
-    try {
-        execFileSync('command', ['-v', name], {
-            encoding: 'utf8', timeout: 5000,
-            stdio: ['pipe', 'pipe', 'pipe'], shell: true,
-        });
-        return true;
-    } catch {
-        return false;
-    }
-}
 
 function postProcessDarwin(filePath: string, options: PostProcessOptions): void {
     const scale = options.scale ?? 1.0;

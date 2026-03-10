@@ -199,9 +199,13 @@ export function globalQuery(params: GlobalQueryParams): GlobalQueryResult {
                 cached: false,
             };
 
-            // Store in cache
+            // Store in cache, evict expired entries to prevent unbounded growth
             const cacheKey = getCacheKey(params.term, mode, params.projectFilter, params.tagFilter);
-            queryCache.set(cacheKey, { result, timestamp: Date.now() });
+            const now = Date.now();
+            for (const [key, entry] of queryCache) {
+                if (now - entry.timestamp >= CACHE_TTL) queryCache.delete(key);
+            }
+            queryCache.set(cacheKey, { result, timestamp: now });
 
             return result;
         }
