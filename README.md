@@ -19,7 +19,7 @@ AiDex is an MCP server that gives AI coding assistants instant access to your en
 
 </details>
 
-### What's Inside — 28 Tools in One Server
+### What's Inside — 29 Tools in One Server
 
 | Category | Tools | What it does |
 |----------|-------|--------------|
@@ -28,6 +28,7 @@ AiDex is an MCP server that gives AI coding assistants instant access to your en
 | **Project Overview** | `summary`, `tree`, `describe`, `files` | Entry points, language breakdown, file tree with stats, file listing by type |
 | **Cross-Project** | `link`, `unlink`, `links`, `scan` | Link dependencies, discover indexed projects |
 | **Global Search** | `global_init`, `global_query`, `global_signatures`, `global_status`, `global_refresh` | Search across ALL your projects at once — "Have I ever written X?" |
+| **Guidelines** | `global_guideline` | Persistent AI instructions & coding conventions — shared across all projects |
 | **Sessions** | `session`, `note` | Track sessions, detect external changes, leave notes for next session (with searchable history) |
 | **Task Backlog** | `task`, `tasks` | Built-in task management with priorities, tags, and auto-logged history |
 | **Screenshots** | `screenshot`, `windows` | Cross-platform screen capture with LLM optimization — scale + color reduction saves up to 95% tokens |
@@ -65,7 +66,7 @@ aidex_task({ path: ".", action: "create", title: "Fix edge case in parser", prio
 
 ## Table of Contents
 
-- [What's Inside](#whats-inside--28-tools-in-one-server)
+- [What's Inside](#whats-inside--29-tools-in-one-server)
 - [The Problem](#the-problem)
 - [The Solution](#the-solution)
 - [Why Not Just Grep?](#why-not-just-grep)
@@ -79,6 +80,7 @@ aidex_task({ path: ".", action: "create", title: "Fix edge case in parser", prio
 - [Session Notes](#session-notes)
 - [Task Backlog](#task-backlog)
 - [Global Search](#global-search)
+- [AI Guidelines](#ai-guidelines)
 - [Screenshots — LLM-Optimized](#screenshots--llm-optimized)
 - [Interactive Viewer](#interactive-viewer)
 - [CLI Usage](#cli-usage)
@@ -299,7 +301,7 @@ Do I want to search code?
 - **`contains`**: Finds identifiers containing the term — `render` matches `preRenderSetup`
 - **`starts_with`**: Finds identifiers starting with the term — `Update` matches `UpdatePlayer`, `UpdateUI`
 
-### All Tools (28)
+### All Tools (29)
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
@@ -512,8 +514,8 @@ With `index_unindexed: true`, it also auto-indexes all discovered projects with 
 ```
 aidex_global_query({ term: "TransparentWindow" })                      # Exact match
 aidex_global_query({ term: "transparent", mode: "contains" })          # Fuzzy search
-aidex_global_signatures({ name: "Render", kind: "method" })            # Find methods
-aidex_global_signatures({ name: "Player", kind: "class" })             # Find classes
+aidex_global_signatures({ term: "Render", kind: "method" })            # Find methods
+aidex_global_signatures({ term: "Player", kind: "class" })             # Find classes
 ```
 
 ### How it works
