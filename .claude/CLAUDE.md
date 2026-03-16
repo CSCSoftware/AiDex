@@ -18,7 +18,7 @@ Registriert als MCP Server `aidex` (Prefix: `mcp__aidex__aidex_*`).
 "mcpServers": {
   "aidex": {
     "command": "node",
-    "args": ["Q:/develop/Tools/CodeGraph/build/index.js"]
+    "args": ["Q:/develop/Tools/AiDex/build/index.js"]
   }
 }
 ```
@@ -28,7 +28,7 @@ Registriert als MCP Server `aidex` (Prefix: `mcp__aidex__aidex_*`).
 "mcpServers": {
   "aidex": {
     "command": "C:\\Program Files\\nodejs\\node.exe",
-    "args": ["Q:\\develop\\Tools\\CodeGraph\\build\\index.js"]
+    "args": ["Q:\\develop\\Tools\\AiDex\\build\\index.js"]
   }
 }
 ```
