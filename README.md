@@ -458,9 +458,15 @@ aidex_note({ path: ".", clear: true })                                 # Clear
 **Note History** (v1.10): Old notes are automatically archived when overwritten or cleared. Browse and search past notes:
 
 ```
-aidex_note({ path: ".", history: true })                    # Browse archived notes
-aidex_note({ path: ".", search: "parser" })                 # Search note history
+aidex_note({ path: ".", history: true })                    # Browse archived notes (shows summaries)
+aidex_note({ path: ".", search: "parser" })                 # Search note history (searches summaries too)
 aidex_note({ path: ".", history: true, limit: 5 })          # Last 5 archived notes
+```
+
+**Note Summaries** (v1.15): Provide a `summary` when writing/clearing a note — the archived note gets this one-sentence description. History then shows summaries instead of truncated text:
+
+```
+aidex_note({ path: ".", note: "New focus", summary: "Previous session: finished parser refactoring" })
 ```
 
 **Use cases:**
@@ -476,13 +482,14 @@ Notes are stored in the SQLite database (`.aidex/index.db`) and persist indefini
 Keep your project tasks right next to your code index - no Jira, no Trello, no context switching:
 
 ```
-aidex_task({ path: ".", action: "create", title: "Fix parser bug", priority: 1, tags: "bug" })
+aidex_task({ path: ".", action: "create", title: "Fix parser bug", priority: 1, tags: "bug", summary: "Parser crashes on nested generics in C#" })
 aidex_task({ path: ".", action: "update", id: 1, status: "done" })
 aidex_task({ path: ".", action: "log", id: 1, note: "Root cause: unbounded buffer" })
 aidex_tasks({ path: ".", status: "active" })
 ```
 
 **Features:**
+- **Summaries**: One-sentence table-of-contents per task — scan the backlog without reading full details
 - **Priorities**: 🔴 high, 🟡 medium, ⚪ low
 - **Statuses**: `backlog → active → done | cancelled`
 - **Tags**: Categorize tasks (`bug`, `feature`, `docs`, etc.)

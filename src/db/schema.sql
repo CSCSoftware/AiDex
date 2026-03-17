@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT,
+    summary TEXT,
     priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (1, 2, 3)),
     status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('backlog', 'active', 'done', 'cancelled')),
     tags TEXT,
@@ -166,6 +167,7 @@ CREATE INDEX IF NOT EXISTS idx_task_log_task ON task_log(task_id);
 CREATE TABLE IF NOT EXISTS note_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     note TEXT NOT NULL,
+    summary TEXT,
     created_at INTEGER NOT NULL
 );
 

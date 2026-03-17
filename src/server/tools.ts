@@ -374,6 +374,10 @@ export function registerTools(): Tool[] {
                         type: 'number',
                         description: 'Max history/search entries to return (default: 20)',
                     },
+                    summary: {
+                        type: 'string',
+                        description: 'One-sentence summary for the archived note (~150 chars). Provide when writing (old note gets archived with this summary) or clearing.',
+                    },
                 },
                 required: ['path'],
             },
@@ -437,6 +441,10 @@ export function registerTools(): Tool[] {
                     description: {
                         type: 'string',
                         description: 'Task description (optional details)',
+                    },
+                    summary: {
+                        type: 'string',
+                        description: 'One-sentence summary (~150 chars). Shown in task list as table-of-contents. Write it on create, update on changes.',
                     },
                     priority: {
                         type: 'number',
@@ -1643,6 +1651,7 @@ function handleNote(args: Record<string, unknown>): { content: Array<{ type: str
         history: args.history as boolean | undefined,
         search: args.search as string | undefined,
         limit: args.limit as number | undefined,
+        summary: args.summary as string | undefined,
     });
 
     if (!result.success) {
@@ -1683,7 +1692,10 @@ function handleNote(args: Record<string, unknown>): { content: Array<{ type: str
 
             const lines = entries.map(e => {
                 const date = new Date(e.created_at).toISOString().replace('T', ' ').slice(0, 19);
-                // Show first 200 chars of each note, with separator
+                if (e.summary) {
+                    return `--- ${date} ---\n📋 ${e.summary}`;
+                }
+                // Fallback: show first 200 chars of each note, with separator
                 const preview = e.note.length > 200 ? e.note.slice(0, 200) + '...' : e.note;
                 return `--- ${date} ---\n${preview}`;
             });
@@ -1839,6 +1851,7 @@ function handleTask(args: Record<string, unknown>): { content: Array<{ type: str
         id: args.id as number | undefined,
         title: args.title as string | undefined,
         description: args.description as string | undefined,
+        summary: args.summary as string | undefined,
         priority: args.priority as 1 | 2 | 3 | undefined,
         status: args.status as 'backlog' | 'active' | 'done' | 'cancelled' | undefined,
         tags: args.tags as string | undefined,
@@ -1861,6 +1874,7 @@ function handleTask(args: Record<string, unknown>): { content: Array<{ type: str
             const t = result.task!;
             let msg = `✓ Task #${t.id} ${result.action === 'create' ? 'created' : 'updated'}\n\n`;
             msg += `**${t.title}**\n`;
+            if (t.summary) msg += `Summary: ${t.summary}\n`;
             msg += `Priority: ${priorityLabel[t.priority]} | Status: ${t.status}\n`;
             if (t.description) msg += `Description: ${t.description}\n`;
             if (t.tags) msg += `Tags: ${t.tags}\n`;
@@ -1870,6 +1884,7 @@ function handleTask(args: Record<string, unknown>): { content: Array<{ type: str
         case 'read': {
             const t = result.task!;
             let msg = `# Task #${t.id}: ${t.title}\n\n`;
+            if (t.summary) msg += `Summary: ${t.summary}\n`;
             msg += `Priority: ${priorityLabel[t.priority]} | Status: ${t.status}\n`;
             if (t.description) msg += `Description: ${t.description}\n`;
             if (t.tags) msg += `Tags: ${t.tags}\n`;
@@ -1945,6 +1960,7 @@ function handleTasks(args: Record<string, unknown>): { content: Array<{ type: st
         msg += `## ${status.charAt(0).toUpperCase() + status.slice(1)} (${items.length})\n`;
         for (const t of items) {
             msg += `- ${priorityIcon[t.priority]} **#${t.id}** ${t.title}`;
+            if (t.summary) msg += ` — ${t.summary}`;
             if (t.tags) msg += ` [${t.tags}]`;
             msg += '\n';
         }

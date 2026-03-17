@@ -635,6 +635,7 @@ function getTasksFromDb(db: Database.Database): unknown[] {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
                 description TEXT,
+                summary TEXT,
                 priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (1, 2, 3)),
                 status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('backlog', 'active', 'done', 'cancelled')),
                 tags TEXT,
@@ -645,6 +646,15 @@ function getTasksFromDb(db: Database.Database): unknown[] {
                 completed_at INTEGER
             );
         `);
+        // Add summary column if missing (for existing DBs before v1.15)
+        try {
+            const hasSummary = db.prepare(
+                "SELECT COUNT(*) as cnt FROM pragma_table_info('tasks') WHERE name = 'summary'"
+            ).get() as { cnt: number };
+            if (hasSummary.cnt === 0) {
+                db.exec('ALTER TABLE tasks ADD COLUMN summary TEXT');
+            }
+        } catch { /* ignore */ }
         return db.prepare(
             `SELECT * FROM tasks ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'backlog' THEN 1 WHEN 'done' THEN 2 WHEN 'cancelled' THEN 3 END, priority ASC, sort_order ASC, created_at DESC`
         ).all();
@@ -1557,6 +1567,9 @@ function getViewerHTML(projectPath: string): string {
             html += '<div class="task-title">' + (priorityIcon[t.priority] || '') + ' #' + t.id + ' ' + escapeHtml(t.title);
             if (showStatus) html += '<span class="task-status-badge status-' + t.status + '">' + t.status + '</span>';
             html += '</div>';
+            if (t.summary) {
+                html += '<div style="font-size:0.88em;color:var(--text-secondary);margin-top:2px;font-style:italic">' + escapeHtml(t.summary) + '</div>';
+            }
             if (t.description) {
                 html += '<div class="task-description">' + escapeHtml(t.description) + '</div>';
             }

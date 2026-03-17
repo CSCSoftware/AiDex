@@ -578,6 +578,7 @@ Read or write session notes. Persists in the database between sessions.
 | `history` | boolean | - | Show archived note history, newest first (default: false) |
 | `search` | string | - | Search term to find in note history (case-insensitive) |
 | `limit` | number | - | Max history/search entries to return (default: 20) |
+| `summary` | string | - | One-sentence summary for the archived note (~150 chars). Provide when writing (old note gets archived with this summary) or clearing. |
 
 **Operations:**
 
@@ -595,8 +596,8 @@ Read or write session notes. Persists in the database between sessions.
 // Read note
 { "path": "." }
 
-// Write note (old note auto-archived)
-{ "path": ".", "note": "Test glob fix after restart" }
+// Write note with summary for archive (old note auto-archived with summary)
+{ "path": ".", "note": "Test glob fix after restart", "summary": "Previous: finished parser refactoring and tests" }
 
 // Append to note
 { "path": ".", "note": "Also check edge cases", "append": true }
@@ -669,6 +670,7 @@ Manage a single task in the project backlog. Tasks persist in the AiDex database
 | `id` | number | for read/update/delete/log | Task ID |
 | `title` | string | for create | Task title |
 | `description` | string | - | Task description (optional details) |
+| `summary` | string | - | One-sentence summary (~150 chars). Shown in task list as table-of-contents. Write on create, update on changes. |
 | `priority` | number | - | `1` = high, `2` = medium (default), `3` = low |
 | `status` | string | - | `backlog` (default), `active`, `done`, `cancelled` |
 | `tags` | string | - | Comma-separated tags (e.g., `"bug, viewer"`) |
@@ -690,10 +692,11 @@ Manage a single task in the project backlog. Tasks persist in the AiDex database
 
 **Examples:**
 ```json
-// Create a high-priority bug task
+// Create a high-priority bug task with summary
 {
   "path": ".", "action": "create",
   "title": "Fix memory leak in parser",
+  "summary": "Parser allocates unbounded buffers for nested generics",
   "priority": 1, "tags": "bug, parser"
 }
 
@@ -728,6 +731,7 @@ List and filter tasks in the project backlog. Returns tasks grouped by status an
 **Returns:**
 - Tasks grouped by status (Active → Backlog → Done → Cancelled)
 - Priority icons: 🔴 high, 🟡 medium, ⚪ low
+- Task summaries shown inline (one-sentence table-of-contents)
 - Tags displayed inline
 
 **Examples:**
@@ -1045,7 +1049,7 @@ SQLite database at `.aidex/index.db`:
 | `dependencies` | Linked projects |
 | `project_files` | All files with type classification |
 | `metadata` | Key-value store (session times, notes, etc.) |
-| `tasks` | Project backlog tasks (priority, status, tags, timestamps) |
+| `tasks` | Project backlog tasks (priority, status, tags, summary, timestamps) |
 | `task_log` | Task history log (auto-logged status changes + manual notes) |
 
 ---

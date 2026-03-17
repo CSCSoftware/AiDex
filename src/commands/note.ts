@@ -26,11 +26,13 @@ export interface NoteParams {
     history?: boolean;  // If true, shows archived note history
     search?: string;    // If provided, searches note history for this term
     limit?: number;     // Max history entries to return (default 20)
+    summary?: string;   // One-sentence summary for the archived note (~150 chars)
 }
 
 export interface NoteHistoryEntry {
     id: number;
     note: string;
+    summary: string | null;
     created_at: number;
 }
 
@@ -80,10 +82,18 @@ export function note(params: NoteParams): NoteResult {
                 CREATE TABLE IF NOT EXISTS note_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     note TEXT NOT NULL,
+                    summary TEXT,
                     created_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_note_history_created ON note_history(created_at);
             `);
+            // Add summary column if missing (for existing DBs before v1.15)
+            const hasSummary = db.getDb().prepare(
+                "SELECT COUNT(*) as cnt FROM pragma_table_info('note_history') WHERE name = 'summary'"
+            ).get() as { cnt: number };
+            if (hasSummary.cnt === 0) {
+                db.getDb().exec('ALTER TABLE note_history ADD COLUMN summary TEXT');
+            }
         }
 
         // --- Search history ---
@@ -117,7 +127,7 @@ export function note(params: NoteParams): NoteResult {
             // Archive current note before clearing
             const existing = db.getMetadata(NOTE_KEY);
             if (existing) {
-                db.archiveNote(existing);
+                db.archiveNote(existing, params.summary);
             }
             db.deleteMetadata(NOTE_KEY);
             return {
@@ -140,7 +150,7 @@ export function note(params: NoteParams): NoteResult {
                 // Overwrite: archive the old note first
                 const existing = db.getMetadata(NOTE_KEY);
                 if (existing) {
-                    db.archiveNote(existing);
+                    db.archiveNote(existing, params.summary);
                 }
             }
 

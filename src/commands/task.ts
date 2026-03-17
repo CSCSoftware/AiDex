@@ -23,6 +23,7 @@ export interface TaskParams {
     id?: number;
     title?: string;
     description?: string;
+    summary?: string;
     priority?: 1 | 2 | 3;
     status?: 'backlog' | 'active' | 'done' | 'cancelled';
     tags?: string;
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT,
+    summary TEXT,
     priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (1, 2, 3)),
     status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('backlog', 'active', 'done', 'cancelled')),
     tags TEXT,
@@ -90,6 +92,7 @@ CREATE TABLE IF NOT EXISTS tasks_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT,
+    summary TEXT,
     priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (1, 2, 3)),
     status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('backlog', 'active', 'done', 'cancelled')),
     tags TEXT,
@@ -99,7 +102,8 @@ CREATE TABLE IF NOT EXISTS tasks_new (
     updated_at INTEGER NOT NULL,
     completed_at INTEGER
 );
-INSERT INTO tasks_new SELECT * FROM tasks;
+INSERT INTO tasks_new (id, title, description, priority, status, tags, source, sort_order, created_at, updated_at, completed_at)
+    SELECT id, title, description, priority, status, tags, source, sort_order, created_at, updated_at, completed_at FROM tasks;
 DROP TABLE tasks;
 ALTER TABLE tasks_new RENAME TO tasks;
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -114,6 +118,14 @@ function ensureTaskTables(db: AiDexDatabase): void {
     const tableInfo = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").get() as { sql: string | null } | undefined;
     if (tableInfo?.sql && !tableInfo.sql.includes('cancelled')) {
         sqlite.exec(TASKS_MIGRATE_CANCELLED);
+    }
+
+    // Add summary column if missing (for existing DBs before v1.15)
+    const hasSummary = sqlite.prepare(
+        "SELECT COUNT(*) as cnt FROM pragma_table_info('tasks') WHERE name = 'summary'"
+    ).get() as { cnt: number };
+    if (hasSummary.cnt === 0) {
+        sqlite.exec('ALTER TABLE tasks ADD COLUMN summary TEXT');
     }
 }
 
@@ -146,6 +158,7 @@ export function task(params: TaskParams): TaskResult {
                         const id = queries.insertTask(
                             params.title,
                             params.description ?? null,
+                            params.summary ?? null,
                             params.priority ?? 2,
                             params.status ?? 'backlog',
                             params.tags ?? null,
@@ -177,6 +190,7 @@ export function task(params: TaskParams): TaskResult {
                         const fields: Record<string, unknown> = {};
                         if (params.title !== undefined) fields.title = params.title;
                         if (params.description !== undefined) fields.description = params.description;
+                        if (params.summary !== undefined) fields.summary = params.summary;
                         if (params.priority !== undefined) fields.priority = params.priority;
                         if (params.status !== undefined) fields.status = params.status;
                         if (params.tags !== undefined) fields.tags = params.tags;

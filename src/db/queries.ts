@@ -84,6 +84,7 @@ export interface TaskRow {
     id: number;
     title: string;
     description: string | null;
+    summary: string | null;
     priority: 1 | 2 | 3;
     status: 'backlog' | 'active' | 'done' | 'cancelled';
     tags: string | null;
@@ -546,6 +547,7 @@ export class Queries {
     insertTask(
         title: string,
         description: string | null,
+        summary: string | null,
         priority: 1 | 2 | 3,
         status: 'backlog' | 'active' | 'done' | 'cancelled',
         tags: string | null,
@@ -553,15 +555,15 @@ export class Queries {
         sortOrder: number
     ): number {
         this._insertTask ??= this.db.prepare(
-            'INSERT INTO tasks (title, description, priority, status, tags, source, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO tasks (title, description, summary, priority, status, tags, source, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         const now = Date.now();
-        const result = this._insertTask.run(title, description, priority, status, tags, source, sortOrder, now, now);
+        const result = this._insertTask.run(title, description, summary, priority, status, tags, source, sortOrder, now, now);
         return result.lastInsertRowid as number;
     }
 
-    updateTask(id: number, fields: Partial<Pick<TaskRow, 'title' | 'description' | 'priority' | 'status' | 'tags' | 'source' | 'sort_order'>>): boolean {
-        const ALLOWED_FIELDS = new Set(['title', 'description', 'status', 'priority', 'tags', 'source', 'sort_order', 'completed_at']);
+    updateTask(id: number, fields: Partial<Pick<TaskRow, 'title' | 'description' | 'summary' | 'priority' | 'status' | 'tags' | 'source' | 'sort_order'>>): boolean {
+        const ALLOWED_FIELDS = new Set(['title', 'description', 'summary', 'status', 'priority', 'tags', 'source', 'sort_order', 'completed_at']);
         const sets: string[] = [];
         const values: unknown[] = [];
         for (const [key, value] of Object.entries(fields)) {

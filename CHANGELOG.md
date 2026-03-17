@@ -4,6 +4,14 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-03-17
+
+### Added
+- **Task summaries**: Tasks now support a `summary` field — a one-sentence table-of-contents entry (~150 chars) that the AI writes on create/update. `aidex_tasks` shows summaries inline so you can scan the backlog without reading full details.
+- **Note history summaries**: Archived notes now get an optional `summary` field. When a note is overwritten or cleared, a summary can be provided for the archive. `aidex_note` with `history: true` shows summaries (with fallback to truncated preview for older notes). Search also matches summaries.
+- **Auto-migration**: Existing databases are automatically upgraded with `ALTER TABLE ADD COLUMN summary` — no manual migration needed.
+- **Viewer integration**: Task summaries shown in italic between title and description in the browser viewer.
+
 ## [1.14.0] - 2026-03-10
 
 ### Added
