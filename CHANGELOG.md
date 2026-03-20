@@ -4,6 +4,21 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+## [1.16.2] - 2026-03-20
+
+### Changed
+- **Auto-setup instructions overhaul**: Complete rewrite of the CLAUDE.md/GEMINI.md block installed by `aidex setup`
+  - Added **Log Hub** section with full usage guide (init, query, HTTP API, Viewer integration)
+  - Added missing query parameters: `modified_before`, `file_filter`, `type_filter`
+  - Added `show_progress` for `global_init`
+  - Added task `summary` field documentation
+  - Added note `summary` field documentation
+  - Updated tool count from 28 → 30
+  - Updated Viewer description to include Logs tab
+  - Added "Debug my app" to Question → Right Tool table
+- **README**: Added `aidex_log` to Available Tools table, updated tool counts to 30
+- **Projekt-CLAUDE.md**: Updated tool count to 30
+
 ## [1.16.1] - 2026-03-20
 
 ### Added

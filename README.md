@@ -303,7 +303,7 @@ Do I want to search code?
 - **`contains`**: Finds identifiers containing the term — `render` matches `preRenderSetup`
 - **`starts_with`**: Finds identifiers starting with the term — `Update` matches `UpdatePlayer`, `UpdateUI`
 
-### All Tools (29)
+### All Tools (30)
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
@@ -314,9 +314,10 @@ Do I want to search code?
 | Global Search | `aidex_global_init`, `aidex_global_query`, `aidex_global_signatures`, `aidex_global_status`, `aidex_global_refresh` | Search across ALL projects |
 | Guidelines | `aidex_global_guideline` | Persistent AI instructions & conventions (key-value, global) |
 | Sessions | `aidex_session`, `aidex_note` | Track sessions, leave notes (with searchable history) |
-| Tasks | `aidex_task`, `aidex_tasks` | Built-in backlog with priorities, tags, auto-logged history |
+| Tasks | `aidex_task`, `aidex_tasks` | Built-in backlog with priorities, tags, summaries, auto-logged history |
+| Log Hub | `aidex_log` | Universal log receiver — any program sends logs via HTTP, AI queries them, live in Viewer |
 | Screenshots | `aidex_screenshot`, `aidex_windows` | Screen capture with LLM optimization (scale + color reduction, no index needed) |
-| Viewer | `aidex_viewer` | Interactive browser UI with file tree, signatures, tasks |
+| Viewer | `aidex_viewer` | Interactive browser UI with file tree, signatures, tasks, and live logs |
 
 **11 languages:** C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby
 
@@ -414,6 +415,7 @@ aidex_init({ path: "/path/to/your/project" })
 | `aidex_global_signatures` | Search methods/types by name across all projects |
 | `aidex_global_refresh` | Update stats and remove stale projects from global DB |
 | `aidex_global_guideline` | Store/retrieve AI guidelines and coding conventions (key-value, global) |
+| `aidex_log` | Universal log receiver — start HTTP server, query logs, live stream in Viewer |
 
 ## Time-based Filtering
 
