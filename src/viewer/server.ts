@@ -188,8 +188,9 @@ export async function startViewer(projectPath: string): Promise<string> {
 
     console.error('[Viewer] Initializing chokidar for', projectRoot);
 
-    // Serve static HTML
+    // Serve static HTML (no-cache to always get fresh JS)
     app.get('/', (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
         res.send(getViewerHTML(projectPath));
     });
 
@@ -304,6 +305,20 @@ export function broadcastTaskUpdate(): void {
     } catch (err) {
         console.error('[Viewer] Failed to broadcast task update:', err);
     }
+}
+
+/**
+ * Broadcast a log entry to all connected viewer clients.
+ * Called from log-server.ts on each new entry.
+ */
+export function broadcastLogEntry(entry: import('../loghub/log-types.js').LogEntry): void {
+    if (!wss) return;
+
+    wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'log', entry }));
+        }
+    });
 }
 
 export function stopViewer(): string {
@@ -812,6 +827,7 @@ function getViewerHTML(projectPath: string): string {
         .tab {
             padding: 10px 20px;
             cursor: pointer;
+            user-select: none;
             color: var(--text-primary);
             border-bottom: 2px solid transparent;
             transition: all 0.2s;
@@ -1125,6 +1141,80 @@ function getViewerHTML(projectPath: string): string {
         .task-status-badge.status-backlog { color: var(--text-muted); border: 1px solid var(--border); }
         .task-status-badge.status-done { color: var(--text-muted); border: 1px solid var(--border); }
         .task-status-badge.status-cancelled { color: var(--accent-red); border: 1px solid var(--accent-red); }
+
+        /* Log Hub styles */
+        .log-container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 120px);
+        }
+        .log-toolbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .log-toolbar select, .log-toolbar input {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 0.85em;
+        }
+        .log-toolbar input { flex: 1; min-width: 120px; }
+        .log-level-btn {
+            padding: 3px 10px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.8em;
+        }
+        .log-level-btn.active { color: var(--text-primary); background: var(--bg-tertiary); }
+        .log-level-btn.level-error.active { border-color: var(--accent-red); color: var(--accent-red); }
+        .log-level-btn.level-warn.active { border-color: var(--accent-orange); color: var(--accent-orange); }
+        .log-level-btn.level-info.active { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+        .log-level-btn.level-debug.active { border-color: var(--text-muted); }
+        .log-entries {
+            flex: 1;
+            overflow-y: auto;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            padding: 8px;
+            font-family: 'Consolas', 'Fira Code', monospace;
+            font-size: 0.82em;
+            line-height: 1.6;
+        }
+        .log-entry-line {
+            display: flex;
+            gap: 8px;
+            padding: 1px 4px;
+            border-radius: 2px;
+        }
+        .log-entry-line:hover { background: rgba(122, 162, 247, 0.08); }
+        .log-entry-line .log-time { color: var(--text-muted); white-space: nowrap; min-width: 85px; }
+        .log-entry-line .log-level { min-width: 16px; text-align: center; }
+        .log-entry-line .log-src { color: var(--accent-purple); min-width: 60px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .log-entry-line .log-msg { color: var(--text-primary); flex: 1; word-break: break-word; }
+        .log-entry-line .log-data { color: var(--text-muted); font-size: 0.9em; }
+        .log-entry-line.level-error .log-msg { color: var(--accent-red); }
+        .log-entry-line.level-warn .log-msg { color: var(--accent-orange); }
+        .log-entry-line.level-debug .log-msg { color: var(--text-muted); }
+        .log-auto-scroll {
+            display: flex; align-items: center; gap: 4px;
+            font-size: 0.85em; color: var(--text-muted);
+            cursor: pointer; user-select: none;
+        }
+        .log-auto-scroll input { cursor: pointer; }
+        .log-not-init {
+            color: var(--text-muted);
+            text-align: center;
+            padding: 40px;
+        }
+        .log-not-init code { color: var(--accent-cyan); }
     </style>
 </head>
 <body>
@@ -1149,6 +1239,7 @@ function getViewerHTML(projectPath: string): string {
                 <div class="tab active" data-tab="overview">Overview</div>
                 <div class="tab" data-tab="source">Code</div>
                 <div class="tab" data-tab="tasks">Tasks</div>
+                <div class="tab" data-tab="logs">Logs</div>
             </div>
             <div class="panel-content" id="detail">
                 <div class="empty-state">
@@ -1206,6 +1297,8 @@ function getViewerHTML(projectPath: string): string {
                 if (currentDetailTab === 'tasks') {
                     renderTasks(msg.data);
                 }
+            } else if (msg.type === 'log') {
+                handleLogEntry(msg.entry);
             }
         };
 
@@ -1223,21 +1316,22 @@ function getViewerHTML(projectPath: string): string {
         // Tab switching - Detail panel
         document.querySelectorAll('.detail-panel .tab').forEach(tab => {
             tab.addEventListener('click', () => {
-                // Tasks tab works without file selection
-                if (!currentFile && tab.dataset.tab !== 'tasks') return;
-
                 document.querySelectorAll('.detail-panel .tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 currentDetailTab = tab.dataset.tab;
 
                 if (currentDetailTab === 'overview') {
-                    if (cachedSignature && cachedSignature.file === currentFile) {
+                    if (!currentFile) {
+                        document.getElementById('detail').innerHTML = '<div class="empty-state"><p>Click on a file to view its signature</p></div>';
+                    } else if (cachedSignature && cachedSignature.file === currentFile) {
                         renderSignature(cachedSignature.file, cachedSignature.data);
                     } else {
                         ws.send(JSON.stringify({ type: 'getSignature', file: currentFile }));
                     }
                 } else if (currentDetailTab === 'source') {
-                    if (cachedContent && cachedContent.file === currentFile) {
+                    if (!currentFile) {
+                        document.getElementById('detail').innerHTML = '<div class="empty-state"><p>Click on a file to view its source</p></div>';
+                    } else if (cachedContent && cachedContent.file === currentFile) {
                         renderFileContent(cachedContent.file, cachedContent.data);
                     } else {
                         document.getElementById('detail').innerHTML = '<div class="loading">Loading source...</div>';
@@ -1250,6 +1344,8 @@ function getViewerHTML(projectPath: string): string {
                         document.getElementById('detail').innerHTML = '<div class="loading">Loading tasks...</div>';
                         ws.send(JSON.stringify({ type: 'getTasks' }));
                     }
+                } else if (currentDetailTab === 'logs') {
+                    renderLogView();
                 }
             });
         });
@@ -1600,6 +1696,130 @@ function getViewerHTML(projectPath: string): string {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'updateTaskStatus', taskId: taskId, status: status }));
             }
+        }
+
+        // ============================================================
+        // Log Hub View
+        // ============================================================
+        let logEntries = [];
+        let logAutoScroll = true;
+        let logFilterLevel = null;  // null = all
+        let logFilterSource = '';
+        let logFilterText = '';
+        let logViewInitialized = false;
+
+        const logLevelIcon = { debug: '\\u26AA', info: '\\u{1F535}', warn: '\\u{1F7E1}', error: '\\u{1F534}' };
+
+        function handleLogEntry(entry) {
+            logEntries.push(entry);
+            // Keep max 5000 entries in browser memory
+            if (logEntries.length > 5000) logEntries = logEntries.slice(-4000);
+
+            if (currentDetailTab === 'logs' && logViewInitialized) {
+                appendLogEntryToDOM(entry);
+            }
+        }
+
+        function renderLogView() {
+            const detail = document.getElementById('detail');
+            logViewInitialized = true;
+
+            // Build sources dropdown from entries
+            const sources = [...new Set(logEntries.map(e => e.source))].sort();
+
+            let html = '<div class="log-container">';
+            html += '<h2>Log Hub</h2>';
+            html += '<div class="log-toolbar">';
+            html += '<button class="log-level-btn level-error active" data-level="error" onclick="toggleLogLevel(this)">Error</button>';
+            html += '<button class="log-level-btn level-warn active" data-level="warn" onclick="toggleLogLevel(this)">Warn</button>';
+            html += '<button class="log-level-btn level-info active" data-level="info" onclick="toggleLogLevel(this)">Info</button>';
+            html += '<button class="log-level-btn level-debug active" data-level="debug" onclick="toggleLogLevel(this)">Debug</button>';
+            html += '<select id="logSourceFilter" onchange="logFilterSource=this.value;filterLogEntries()">';
+            html += '<option value="">All sources</option>';
+            for (const s of sources) html += '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + '</option>';
+            html += '</select>';
+            html += '<input type="text" id="logTextFilter" placeholder="Search..." oninput="logFilterText=this.value;filterLogEntries()">';
+            html += '<label class="log-auto-scroll"><input type="checkbox" ' + (logAutoScroll ? 'checked' : '') + ' onchange="logAutoScroll=this.checked"> Auto-scroll</label>';
+            html += '</div>';
+
+            if (logEntries.length === 0) {
+                html += '<div class="log-not-init"><p>No log entries received yet.</p>';
+                html += '<p style="margin-top:12px">Start the Log Hub with <code>aidex_log init</code></p>';
+                html += '<p style="margin-top:8px;font-size:0.85em">Then send logs via HTTP POST to <code>http://localhost:3335/log</code></p></div>';
+            }
+
+            html += '<div class="log-entries" id="logEntries"></div>';
+            html += '</div>';
+
+            detail.innerHTML = html;
+            filterLogEntries();
+        }
+
+        const logActivelevels = new Set(['error', 'warn', 'info', 'debug']);
+
+        function toggleLogLevel(btn) {
+            const level = btn.dataset.level;
+            if (logActivelevels.has(level)) {
+                logActivelevels.delete(level);
+                btn.classList.remove('active');
+            } else {
+                logActivelevels.add(level);
+                btn.classList.add('active');
+            }
+            filterLogEntries();
+        }
+
+        function filterLogEntries() {
+            const container = document.getElementById('logEntries');
+            if (!container) return;
+            container.innerHTML = '';
+
+            const textLower = logFilterText.toLowerCase();
+            for (const e of logEntries) {
+                if (!logActivelevels.has(e.level)) continue;
+                if (logFilterSource && e.source !== logFilterSource) continue;
+                if (textLower && !e.message.toLowerCase().includes(textLower)) continue;
+                container.innerHTML += formatLogEntry(e);
+            }
+
+            if (logAutoScroll) container.scrollTop = container.scrollHeight;
+        }
+
+        function appendLogEntryToDOM(entry) {
+            const container = document.getElementById('logEntries');
+            if (!container) return;
+
+            const textLower = logFilterText.toLowerCase();
+            if (!logActivelevels.has(entry.level)) return;
+            if (logFilterSource && entry.source !== logFilterSource) return;
+            if (textLower && !entry.message.toLowerCase().includes(textLower)) return;
+
+            // Update sources dropdown if new source
+            const select = document.getElementById('logSourceFilter');
+            if (select) {
+                const exists = Array.from(select.options).some(o => o.value === entry.source);
+                if (!exists && entry.source) {
+                    const opt = document.createElement('option');
+                    opt.value = entry.source;
+                    opt.textContent = entry.source;
+                    select.appendChild(opt);
+                }
+            }
+
+            container.innerHTML += formatLogEntry(entry);
+            if (logAutoScroll) container.scrollTop = container.scrollHeight;
+        }
+
+        function formatLogEntry(e) {
+            const time = new Date(e.timestamp).toISOString().slice(11, 23);
+            const icon = logLevelIcon[e.level] || '';
+            const data = e.data ? ' <span class="log-data">' + escapeHtml(e.data) + '</span>' : '';
+            return '<div class="log-entry-line level-' + e.level + '">'
+                + '<span class="log-time">' + time + '</span>'
+                + '<span class="log-level">' + icon + '</span>'
+                + '<span class="log-src" title="' + escapeHtml(e.source) + '">' + escapeHtml(e.source) + '</span>'
+                + '<span class="log-msg">' + escapeHtml(e.message) + data + '</span>'
+                + '</div>';
         }
 
         // Splitter functionality

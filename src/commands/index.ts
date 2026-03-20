@@ -16,3 +16,5 @@ export { session, updateSessionHeartbeat, getSessionInfo, formatSessionTime, for
 export { task, tasks, type TaskParams, type TaskResult, type TasksParams, type TasksResult, type TaskAction } from './task.js';
 export { screenshot, listWindows, type ScreenshotParams, type ScreenshotResult, type ScreenshotMode, type ScreenshotColors, type WindowsParams, type WindowsResult, type WindowInfo } from './screenshot/index.js';
 export { globalInit, globalStatus, globalQuery, invalidateGlobalCache, globalSignatures, globalRefresh, globalGuideline, type GlobalInitParams, type GlobalInitResult, type UnindexedRepo, type GlobalStatusParams, type GlobalStatusResult, type GlobalStatusProject, type GlobalQueryParams, type GlobalQueryResult, type GlobalQueryMode, type GlobalSignaturesParams, type GlobalSignaturesResult, type SignatureKind, type GlobalRefreshParams, type GlobalRefreshResult, type GlobalGuidelineParams, type GlobalGuidelineResult, type GuidelineAction } from './global/index.js';
+export { log, type LogParams, type LogResult, type LogAction, type LogLevel } from './log.js';
+export type { LogEntry, LogStats } from '../loghub/log-types.js';

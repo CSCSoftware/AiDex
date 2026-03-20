@@ -19,7 +19,7 @@ AiDex is an MCP server that gives AI coding assistants instant access to your en
 
 </details>
 
-### What's Inside — 29 Tools in One Server
+### What's Inside — 30 Tools in One Server
 
 | Category | Tools | What it does |
 |----------|-------|--------------|
@@ -31,8 +31,9 @@ AiDex is an MCP server that gives AI coding assistants instant access to your en
 | **Guidelines** | `global_guideline` | Persistent AI instructions & coding conventions — shared across all projects |
 | **Sessions** | `session`, `note` | Track sessions, detect external changes, leave notes for next session (with searchable history) |
 | **Task Backlog** | `task`, `tasks` | Built-in task management with priorities, tags, and auto-logged history |
+| **Log Hub** | `log` | Universal log receiver — any program sends logs via HTTP, queryable by the AI, live in Viewer |
 | **Screenshots** | `screenshot`, `windows` | Cross-platform screen capture with LLM optimization — scale + color reduction saves up to 95% tokens |
-| **Viewer** | `viewer` | Interactive browser UI with file tree, signatures, tasks, and live reload |
+| **Viewer** | `viewer` | Interactive browser UI with file tree, signatures, tasks, logs, and live reload |
 
 **11 languages** — C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby
 

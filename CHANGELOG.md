@@ -4,6 +4,15 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Log Hub** (`aidex_log`): Universal logging system — any program (C#, Python, Node, etc.) sends logs via HTTP POST to AiDex, queryable by the LLM via MCP tool. Zero-cost when not used — no server, no buffer, no resources until `init` is called.
+  - **HTTP Server** on port 3335 (configurable): `POST /log` (single), `POST /logs` (batch), `GET /health`
+  - **Ring Buffer**: In-memory circular buffer (default 10,000 entries), oldest entries overwritten
+  - **Query**: Filter by `since`, `level`, `source`, `contains`, `limit` — newest first
+  - **Write**: LLM can inject entries (source: "claude")
+  - **Persistence**: Optional SQLite storage with 7-day auto-cleanup
+  - **Viewer integration**: New "Logs" tab with WebSocket live-stream, level/source/text filters, auto-scroll
+
 ## [1.15.0] - 2026-03-17
 
 ### Added

@@ -15,6 +15,7 @@ import { scan, init } from './commands/index.js';
 import { setupMcpClients, unsetupMcpClients } from './commands/setup.js';
 import { PRODUCT_NAME, PRODUCT_NAME_LOWER } from './constants.js';
 import { stopViewer } from './viewer/server.js';
+import { freeLogHub } from './loghub/log-server.js';
 
 async function main() {
     const args = process.argv.slice(2);
@@ -95,6 +96,7 @@ async function main() {
 
     // Graceful shutdown handlers
     const shutdown = () => {
+        freeLogHub();
         stopViewer();
         process.exit(0);
     };

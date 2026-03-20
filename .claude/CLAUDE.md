@@ -36,7 +36,7 @@ Registriert als MCP Server `aidex` (Prefix: `mcp__aidex__aidex_*`).
 **Nach Änderungen:** Build ausführen, dann Claude Code neu starten.
 **MCP-Name:** Server muss als `"aidex"` registriert sein → Prefix wird `mcp__aidex__aidex_*`.
 
-## Tools (27)
+## Tools (28)
 
 ### Suche & Index
 | Tool | Beschreibung |
@@ -82,6 +82,13 @@ Registriert als MCP Server `aidex` (Prefix: `mcp__aidex__aidex_*`).
 
 Status: `backlog → active → done | cancelled`
 
+### Log Hub (v1.16+)
+| Tool | Beschreibung |
+|------|--------------|
+| `aidex_log` | Universal-Logging: init/free/status/query/clear/write. HTTP-Server empfängt Logs von externen Programmen |
+
+Actions: `init` (Server starten) → `query` (Logs abfragen) → `free` (Server stoppen)
+
 ### Screenshots (v1.9+, Optimierung v1.13)
 | Tool | Beschreibung |
 |------|--------------|
@@ -112,7 +119,7 @@ src/
 ├── commands/             # Tool-Implementierungen
 │   ├── init.ts, query.ts, signature.ts, update.ts
 │   ├── summary.ts, link.ts, scan.ts, files.ts
-│   ├── session.ts, note.ts, task.ts
+│   ├── session.ts, note.ts, task.ts, log.ts
 │   ├── screenshot/              # Plattform-Screenshots
 │   └── global/                  # Global Search (v1.11)
 │       ├── global-init.ts       # Scan + Bulk-Index
@@ -120,6 +127,10 @@ src/
 │       ├── global-signatures.ts # Methoden/Typen suchen
 │       ├── global-status.ts     # Projekt-Übersicht
 │       └── global-refresh.ts    # Stats aktualisieren
+├── loghub/                      # Log Hub (v1.16)
+│   ├── log-types.ts       # Shared Types
+│   ├── log-buffer.ts      # Ring Buffer (FIFO)
+│   └── log-server.ts      # HTTP Server Singleton (Port 3335)
 ├── viewer/
 │   ├── server.ts         # Interactive Viewer (Port 3333)
 │   └── progress.ts       # SSE Progress UI (Port 3334)
@@ -227,6 +238,24 @@ aidex_global_refresh()                                                 # Stats u
 - Bulk-Index: ≤500 Code-Dateien automatisch, >500 werden dem User gezeigt
 - Progress-UI: SSE-basiert auf Port 3334 mit Browser-Auto-Open
 - Auto-Deduplizierung: Parent-Projekte mit Sub-Projekten werden übersprungen
+
+### Log Hub (v1.16)
+```
+aidex_log({ action: "init" })                                         # Server starten (Port 3335)
+aidex_log({ action: "init", port: 3336, buffer_size: 5000 })          # Custom Port + Buffer
+aidex_log({ action: "init", persist: true, path: "." })               # Mit DB-Persistenz
+aidex_log({ action: "query" })                                        # Letzte 50 Entries
+aidex_log({ action: "query", since: "10m", level: "error" })          # Fehler der letzten 10 Min
+aidex_log({ action: "query", source: "MyApp", contains: "crash" })    # Gefiltert
+aidex_log({ action: "write", message: "Debug started" })              # LLM-Eintrag
+aidex_log({ action: "status" })                                       # Stats
+aidex_log({ action: "clear" })                                        # Buffer leeren
+aidex_log({ action: "free" })                                         # Server stoppen
+```
+- HTTP API: `POST /log` (single), `POST /logs` (batch), `GET /health`
+- Ring Buffer: Fixed-size FIFO, älteste werden überschrieben
+- Viewer: Logs-Tab mit WebSocket-Live-Stream + Filter
+- Zero-Cost: Kein Server/Buffer bis `init` aufgerufen wird
 
 ### Auto-Cleanup (v1.3.1)
 `aidex_init` entfernt automatisch Dateien die jetzt excluded sind (z.B. build/).

@@ -39,6 +39,8 @@ Complete reference for all AiDex MCP tools.
   - [aidex_global_signatures](#aidex_global_signatures)
   - [aidex_global_refresh](#aidex_global_refresh)
   - [aidex_global_guideline](#aidex_global_guideline)
+- [Log Hub](#log-hub)
+  - [aidex_log](#aidex_log)
 - [Screenshots](#screenshots)
   - [aidex_screenshot](#aidex_screenshot)
   - [aidex_windows](#aidex_windows)
@@ -885,6 +887,103 @@ Store, retrieve, list, or delete persistent AI guidelines and coding conventions
 ```
 
 **Returns:** For `get` — key, value, created/updated timestamps. For `list` — all matching guidelines. For `set`/`delete` — confirmation message.
+
+---
+
+## Log Hub
+
+### aidex_log
+
+Universal log receiver — any program (C#, Python, Node, etc.) can send logs via HTTP POST, queryable by the LLM. **Zero-cost when not used** — no server, no buffer, no resources until `init` is called. No project index required.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `action` | string | ✅ | `init`, `free`, `status`, `query`, `clear`, or `write` |
+| `port` | number | - | HTTP port (default: `3335`, used with `init`) |
+| `buffer_size` | number | - | Ring buffer size (default: `10000`, used with `init`) |
+| `persist` | boolean | - | Enable SQLite persistence (default: `false`, used with `init`) |
+| `path` | string | - | Project path for DB persistence (required when `persist=true`) |
+| `since` | string | - | Time filter for query: `"30m"`, `"2h"`, `"1d"`, or ISO date |
+| `level` | string | - | Filter by level: `debug`, `info`, `warn`, `error` (query/write) |
+| `source` | string | - | Filter by source name (query) |
+| `contains` | string | - | Filter by message substring (query) |
+| `limit` | number | - | Max entries to return (default: `50`, used with query) |
+| `message` | string | for write | Log message text |
+| `data` | string | - | Optional JSON data (write) |
+
+**Actions:**
+
+| Action | Description |
+|--------|-------------|
+| `init` | Start HTTP server and ring buffer. Optional: `persist` + `path` for SQLite storage |
+| `free` | Stop server, free all resources, release port |
+| `status` | Show stats: entries, buffer usage, sources, level counts, port |
+| `query` | Search logs with filters (since, level, source, contains, limit). Newest first |
+| `clear` | Clear the ring buffer (keep server running) |
+| `write` | Inject a log entry as source "claude" |
+
+**HTTP API (for external programs):**
+
+| Endpoint | Method | Body | Description |
+|----------|--------|------|-------------|
+| `/log` | POST | `{ level, source, message, data? }` | Send single entry |
+| `/logs` | POST | `[{ level, source, message, data? }, ...]` | Send batch |
+| `/health` | GET | - | Status check |
+
+Body limit: 64KB. CORS enabled. Levels: `debug`, `info`, `warn`, `error`.
+
+**Examples:**
+```json
+// Start Log Hub
+{ "action": "init" }
+
+// Start with persistence
+{ "action": "init", "persist": true, "path": "." }
+
+// Query last 10 minutes of errors
+{ "action": "query", "since": "10m", "level": "error" }
+
+// Query by source
+{ "action": "query", "source": "MyApp", "contains": "connection" }
+
+// LLM writes a log entry
+{ "action": "write", "level": "info", "message": "Starting debug session" }
+
+// Stop and free
+{ "action": "free" }
+```
+
+**Client snippets:**
+```bash
+# curl
+curl -X POST localhost:3335/log -H "Content-Type: application/json" \
+  -d '{"level":"info","source":"test","message":"Hello from curl"}'
+```
+```csharp
+// C#
+await new HttpClient().PostAsJsonAsync("http://localhost:3335/log",
+    new { level = "info", source = "MyApp", message = "Player spawned", data = new { x = 10, y = 20 } });
+```
+```python
+# Python
+requests.post("http://localhost:3335/log",
+    json={"level": "info", "source": "trainer", "message": "Epoch 5 done", "data": {"loss": 0.023}})
+```
+```typescript
+// Node/TypeScript
+fetch("http://localhost:3335/log", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({level: "info", source: "worker", message: "Job complete"})
+});
+```
+```powershell
+# PowerShell
+Invoke-RestMethod -Method Post -Uri http://localhost:3335/log -ContentType "application/json" -Body '{"level":"info","source":"script","message":"Done"}'
+```
+
+**Viewer integration:** When the Viewer is running, a "Logs" tab shows live log entries via WebSocket with client-side filtering (level, source, text search, auto-scroll).
 
 ---
 

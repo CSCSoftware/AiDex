@@ -5,7 +5,7 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction } from '../commands/index.js';
+import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, log, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction, type LogAction, type LogLevel } from '../commands/index.js';
 import type { TaskRow } from '../db/index.js';
 import { openDatabase } from '../db/index.js';
 import { startViewer, stopViewer } from '../viewer/index.js';
@@ -755,6 +755,66 @@ export function registerTools(): Tool[] {
                 required: ['action'],
             },
         },
+        {
+            name: `${TOOL_PREFIX}log`,
+            description: `Universal Log Hub — receive and query logs from any external program (C#, Python, Node, etc.) via HTTP. Zero-cost when not used. Actions: init (start HTTP server), free (stop server), status (show stats), query (search logs), clear (reset buffer), write (inject entry as "claude").`,
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    action: {
+                        type: 'string',
+                        enum: ['init', 'free', 'status', 'query', 'clear', 'write'],
+                        description: 'init: start server | free: stop server | status: stats | query: search logs | clear: reset buffer | write: inject entry',
+                    },
+                    port: {
+                        type: 'number',
+                        description: 'HTTP port (default: 3335, used with init)',
+                    },
+                    buffer_size: {
+                        type: 'number',
+                        description: 'Ring buffer size (default: 10000, used with init)',
+                    },
+                    persist: {
+                        type: 'boolean',
+                        description: 'Enable SQLite persistence (default: false, used with init)',
+                    },
+                    path: {
+                        type: 'string',
+                        description: 'Project path for DB persistence (required when persist=true)',
+                    },
+                    since: {
+                        type: 'string',
+                        description: 'Time filter for query: "30m", "2h", "1d", or ISO date',
+                    },
+                    level: {
+                        type: 'string',
+                        enum: ['debug', 'info', 'warn', 'error'],
+                        description: 'Filter by log level (query/write)',
+                    },
+                    source: {
+                        type: 'string',
+                        description: 'Filter by source name (query)',
+                    },
+                    contains: {
+                        type: 'string',
+                        description: 'Filter by message substring (query)',
+                    },
+                    limit: {
+                        type: 'number',
+                        description: 'Max entries to return (default: 50, used with query)',
+                    },
+                    message: {
+                        type: 'string',
+                        description: 'Log message text (required for write)',
+                    },
+                    data: {
+                        type: 'string',
+                        description: 'Optional JSON data (write)',
+                    },
+                },
+                required: ['action'],
+            },
+        },
     ];
 }
 
@@ -850,6 +910,9 @@ export async function handleToolCall(
 
             case `${TOOL_PREFIX}global_guideline`:
                 return handleGlobalGuideline(args);
+
+            case `${TOOL_PREFIX}log`:
+                return await handleLog(args);
 
             default:
                 return {
@@ -2427,4 +2490,108 @@ function formatRelativeTime(timestamp: number): string {
     if (hours < 24) return `${hours}h ago`;
     if (days < 7) return `${days}d ago`;
     return `${Math.floor(days / 7)}w ago`;
+}
+
+// ============================================================
+// Log Hub Handler
+// ============================================================
+
+async function handleLog(args: Record<string, unknown>): Promise<{ content: Array<{ type: string; text: string }> }> {
+    const action = args.action as LogAction;
+
+    if (!action) {
+        return {
+            content: [{ type: 'text', text: 'Error: action parameter is required' }],
+        };
+    }
+
+    const result = await log({
+        action,
+        port: args.port as number | undefined,
+        buffer_size: args.buffer_size as number | undefined,
+        persist: args.persist as boolean | undefined,
+        path: args.path as string | undefined,
+        since: args.since as string | undefined,
+        level: args.level as LogLevel | undefined,
+        source: args.source as string | undefined,
+        contains: args.contains as string | undefined,
+        limit: args.limit as number | undefined,
+        message: args.message as string | undefined,
+        data: args.data as string | undefined,
+    });
+
+    if (!result.success && result.error) {
+        return {
+            content: [{ type: 'text', text: `Error: ${result.error}` }],
+        };
+    }
+
+    const levelIcon: Record<string, string> = { debug: '⚪', info: '🔵', warn: '🟡', error: '🔴' };
+
+    switch (action) {
+        case 'init': {
+            let msg = '✓ Log Hub initialized\n\n';
+            if (result.stats) {
+                msg += `Port: ${result.stats.port}\n`;
+                msg += `Buffer: ${result.stats.bufferSize} entries\n`;
+                msg += `Persistence: ${result.stats.persist ? 'enabled' : 'disabled'}\n`;
+                msg += `\nHTTP endpoints:\n`;
+                msg += `- POST http://localhost:${result.stats.port}/log — single entry\n`;
+                msg += `- POST http://localhost:${result.stats.port}/logs — batch\n`;
+                msg += `- GET  http://localhost:${result.stats.port}/health — status\n`;
+            }
+            return { content: [{ type: 'text', text: msg.trimEnd() }] };
+        }
+
+        case 'free':
+            return { content: [{ type: 'text', text: '✓ Log Hub stopped, resources freed' }] };
+
+        case 'status': {
+            if (result.error) {
+                return { content: [{ type: 'text', text: `ℹ️ ${result.error}` }] };
+            }
+            const s = result.stats!;
+            let msg = `# Log Hub Status\n\n`;
+            msg += `Port: ${s.port}\n`;
+            msg += `Entries: ${s.entries} / ${s.bufferSize} (${s.bufferUsage})\n`;
+            msg += `Persistence: ${s.persist ? 'enabled' : 'disabled'}\n`;
+            if (s.entries > 0) {
+                msg += `ID range: ${s.oldestId} — ${s.newestId}\n`;
+                msg += `Sources: ${s.sources.join(', ')}\n`;
+                msg += `Levels: ${Object.entries(s.levelCounts).map(([l, c]) => `${levelIcon[l] || ''} ${l}: ${c}`).join(' | ')}\n`;
+            }
+            return { content: [{ type: 'text', text: msg.trimEnd() }] };
+        }
+
+        case 'query': {
+            const entries = result.entries ?? [];
+            if (entries.length === 0) {
+                return { content: [{ type: 'text', text: 'No log entries found matching the filters.' }] };
+            }
+
+            let msg = `# Log Entries (${entries.length})\n\n`;
+            for (const e of entries) {
+                const time = new Date(e.timestamp).toISOString().slice(11, 23);
+                const icon = levelIcon[e.level] || '';
+                msg += `${icon} \`${time}\` **[${e.source}]** ${e.message}`;
+                if (e.data) msg += ` \`${e.data}\``;
+                msg += '\n';
+            }
+            return { content: [{ type: 'text', text: msg.trimEnd() }] };
+        }
+
+        case 'clear':
+            return { content: [{ type: 'text', text: '✓ Log buffer cleared' }] };
+
+        case 'write': {
+            const e = result.entries?.[0];
+            if (e) {
+                return { content: [{ type: 'text', text: `✓ Log entry #${e.id} written (${e.level}: ${e.message})` }] };
+            }
+            return { content: [{ type: 'text', text: '✓ Entry written' }] };
+        }
+
+        default:
+            return { content: [{ type: 'text', text: `Unknown action: ${action}` }] };
+    }
 }
