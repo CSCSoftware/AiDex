@@ -99,6 +99,7 @@ export async function log(params: LogParams): Promise<LogResult> {
                 source: params.source,
                 contains: params.contains,
                 limit: params.limit ?? 50,
+                consume: params.consume ?? false,
             });
 
             return { success: true, action, entries };

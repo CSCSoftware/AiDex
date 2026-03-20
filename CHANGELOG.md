@@ -4,6 +4,17 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+## [1.16.1] - 2026-03-20
+
+### Added
+- **Log Hub consume pattern**: New `consume` parameter on `aidex_log` query — returned entries are removed from the buffer, ideal for polling without duplicates
+- **Viewer: Clear Logs button**: "Clear" button in the Logs tab to reset the log display
+- **Viewer: WebSocket auto-reconnect**: Viewer automatically reconnects when WebSocket connection drops (2s retry)
+- **LogHub Developer Guide**: Added comprehensive integration guide to project CLAUDE.md with code examples for C#, Python, JavaScript, C/C++, PowerShell
+
+### Fixed
+- **Log entry `data: null` display**: Entries with `data: null` no longer show "null" text in Viewer and MCP output
+
 ## [1.16.0] - 2026-03-20
 
 ### Added

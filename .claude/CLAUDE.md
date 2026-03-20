@@ -2,7 +2,7 @@
 
 MCP Server für persistentes Code-Indexing. Ermöglicht Claude Code schnelle, präzise Suchen statt Grep/Glob.
 
-**Version:** 1.16.0 | **Sprachen:** 11 | **Repo:** https://github.com/CSCSoftware/AiDex
+**Version:** 1.16.1 | **Sprachen:** 11 | **Repo:** https://github.com/CSCSoftware/AiDex
 
 ## Build & Run
 
@@ -275,6 +275,109 @@ node build/index.js init <path>  # Indexieren
 - **Hash-Diff:** Zeilen-Timestamps bleiben bei unverändertem Hash
 - **Arrow Functions:** Werden als Methods erkannt (gewollt, etwas Noise)
 - **Keyword-Filter:** Pro Sprache in `src/parser/languages/`
+
+## LogHub Developer Guide
+
+### Übersicht
+
+LogHub ist ein universeller Log-Empfänger. Jedes Programm kann per HTTP POST Logs senden — keine Library, kein SDK nötig. Die KI kann die Logs abfragen, der User sieht sie live im AiDex Viewer.
+
+### Setup (durch die KI)
+
+```
+1. aidex_log({ action: "init" })                    # Server starten (Port 3335)
+2. aidex_viewer({ path: "." })                       # Viewer öffnen → Logs-Tab zeigt Live-Stream
+3. Logging in das Programm einbauen (siehe unten)
+4. aidex_log({ action: "query", since: "5m" })       # KI fragt Logs ab
+5. aidex_log({ action: "free" })                     # Am Ende: Server stoppen
+```
+
+### HTTP API
+
+| Endpoint | Method | Body | Beschreibung |
+|----------|--------|------|--------------|
+| `/log` | POST | `{ level, source, message, data? }` | Einzelner Log-Eintrag |
+| `/logs` | POST | `[{ level, source, message, data? }, ...]` | Batch (mehrere auf einmal) |
+| `/health` | GET | — | Status + Buffer-Auslastung |
+
+**Felder:**
+- `level`: `"debug"`, `"info"`, `"warn"`, `"error"` (default: `"info"`)
+- `source`: Name der App/Komponente (z.B. `"MyApp"`, `"Parser"`)
+- `message`: Log-Text (required)
+- `data`: Beliebiges JSON-Objekt für strukturierte Daten (optional)
+- `timestamp`: Unix-Timestamp in ms (optional, sonst Server-Zeit)
+
+### Code-Beispiele für verschiedene Sprachen
+
+**C# (.NET)**
+```csharp
+using var http = new HttpClient();
+http.PostAsJsonAsync("http://localhost:3335/log", new {
+    level = "info",
+    source = "MyApp",
+    message = "Player spawned",
+    data = new { x = 10, y = 20 }
+});
+```
+
+**C# (Minimal-Helper)**
+```csharp
+// Einmal initialisieren
+static readonly HttpClient _log = new();
+static void Log(string msg, string level = "info", object? data = null) {
+    var body = new { level, source = "MyApp", message = msg, data };
+    _ = _log.PostAsJsonAsync("http://localhost:3335/log", body);
+}
+
+// Verwenden
+Log("Game started");
+Log("Error loading level", "error", new { levelId = 5 });
+```
+
+**Python**
+```python
+import requests
+requests.post("http://localhost:3335/log", json={
+    "level": "info",
+    "source": "MyScript",
+    "message": "Processing complete",
+    "data": {"items": 42}
+})
+```
+
+**JavaScript / Node.js**
+```javascript
+fetch("http://localhost:3335/log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+        level: "info",
+        source: "MyApp",
+        message: "Server started",
+    })
+});
+```
+
+**C / C++ (curl)**
+```c
+// Mit libcurl oder shell:
+// curl -X POST http://localhost:3335/log -H "Content-Type: application/json" -d '{"level":"info","source":"MyApp","message":"Init done"}'
+```
+
+**PowerShell**
+```powershell
+Invoke-RestMethod -Uri "http://localhost:3335/log" -Method POST -ContentType "application/json" -Body '{"level":"info","source":"MyApp","message":"Task done"}'
+```
+
+### Tipps für die KI
+
+- **Viewer immer mit anbieten** — `aidex_viewer({ path: "." })` öffnet den Browser, Logs-Tab zeigt Live-Stream via WebSocket
+- **Source sinnvoll wählen** — ermöglicht Filtern per `aidex_log({ action: "query", source: "MyApp" })`
+- **Level nutzen** — `error` für Fehler, `warn` für Warnungen, `debug` für Verbose
+- **Batch für Performance** — bei vielen Logs pro Sekunde `/logs` statt `/log` verwenden
+- **Consume-Pattern** — `aidex_log({ action: "query", consume: true })` holt Logs und entfernt sie aus dem Buffer (Poll-Muster)
+- **Fire & Forget** — Logs asynchron senden (kein await nötig), damit die App nicht blockiert
+- **Kein Error-Handling nötig** — wenn LogHub nicht läuft, schlägt der POST still fehl
 
 ## Dokumentation
 

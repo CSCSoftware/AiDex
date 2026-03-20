@@ -910,6 +910,7 @@ Universal log receiver — any program (C#, Python, Node, etc.) can send logs vi
 | `source` | string | - | Filter by source name (query) |
 | `contains` | string | - | Filter by message substring (query) |
 | `limit` | number | - | Max entries to return (default: `50`, used with query) |
+| `consume` | boolean | - | If true, returned entries are removed from buffer — ideal for polling without duplicates (default: `false`, used with query) |
 | `message` | string | for write | Log message text |
 | `data` | string | - | Optional JSON data (write) |
 
@@ -920,7 +921,7 @@ Universal log receiver — any program (C#, Python, Node, etc.) can send logs vi
 | `init` | Start HTTP server and ring buffer. Optional: `persist` + `path` for SQLite storage |
 | `free` | Stop server, free all resources, release port |
 | `status` | Show stats: entries, buffer usage, sources, level counts, port |
-| `query` | Search logs with filters (since, level, source, contains, limit). Newest first |
+| `query` | Search logs with filters (since, level, source, contains, limit, consume). Newest first |
 | `clear` | Clear the ring buffer (keep server running) |
 | `write` | Inject a log entry as source "claude" |
 
@@ -947,6 +948,9 @@ Body limit: 64KB. CORS enabled. Levels: `debug`, `info`, `warn`, `error`.
 
 // Query by source
 { "action": "query", "source": "MyApp", "contains": "connection" }
+
+// Poll and consume (entries removed from buffer after reading)
+{ "action": "query", "consume": true }
 
 // LLM writes a log entry
 { "action": "write", "level": "info", "message": "Starting debug session" }

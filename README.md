@@ -67,7 +67,7 @@ aidex_task({ path: ".", action: "create", title: "Fix edge case in parser", prio
 
 ## Table of Contents
 
-- [What's Inside](#whats-inside--29-tools-in-one-server)
+- [What's Inside](#whats-inside--30-tools-in-one-server)
 - [The Problem](#the-problem)
 - [The Solution](#the-solution)
 - [Why Not Just Grep?](#why-not-just-grep)
@@ -82,6 +82,7 @@ aidex_task({ path: ".", action: "create", title: "Fix edge case in parser", prio
 - [Task Backlog](#task-backlog)
 - [Global Search](#global-search)
 - [AI Guidelines](#ai-guidelines)
+- [Log Hub](#log-hub--universal-logging)
 - [Screenshots — LLM-Optimized](#screenshots--llm-optimized)
 - [Interactive Viewer](#interactive-viewer)
 - [CLI Usage](#cli-usage)
@@ -563,6 +564,70 @@ aidex_global_guideline({ action: "delete", key: "old-rule" })          # Remove 
 
 Guidelines are stored in `~/.aidex/global.db` — available across all your projects without `aidex_init`. Ask your AI: *"Load the review guideline and apply it to this file."*
 
+## Log Hub — Universal Logging
+
+Turn any program into a log source for your AI assistant. Your app sends logs via HTTP POST, the AI queries them via MCP, and you see them live in the Viewer — zero dependencies, zero setup in your code.
+
+### How it works
+
+```
+Your Program ──HTTP POST──→ AiDex Log Hub (port 3335) ──→ Ring Buffer
+                                        │                      │
+                                        │ WebSocket             │ MCP query
+                                        ↓                      ↓
+                                   Viewer (Logs tab)      AI Assistant
+                                   (you see live)       (queries & analyzes)
+```
+
+### Quick start
+
+1. AI starts the Log Hub: `aidex_log({ action: "init" })`
+2. AI opens the Viewer: `aidex_viewer({ path: "." })` — Logs tab shows live stream
+3. Add one line to your program:
+
+```csharp
+// C#
+await new HttpClient().PostAsJsonAsync("http://localhost:3335/log",
+    new { level = "info", source = "MyApp", message = "Player spawned", data = new { x = 10, y = 20 } });
+```
+
+```python
+# Python
+requests.post("http://localhost:3335/log", json={"level": "info", "source": "MyApp", "message": "Done"})
+```
+
+```javascript
+// JavaScript
+fetch("http://localhost:3335/log", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({level: "info", source: "MyApp", message: "Started"})
+});
+```
+
+```powershell
+# PowerShell
+Invoke-RestMethod -Uri http://localhost:3335/log -Method POST -ContentType "application/json" -Body '{"level":"info","source":"Script","message":"Done"}'
+```
+
+### HTTP API
+
+| Endpoint | Method | Body | Description |
+|----------|--------|------|-------------|
+| `/log` | POST | `{ level, source, message, data? }` | Single log entry |
+| `/logs` | POST | `[{ ... }, ...]` | Batch (multiple at once) |
+| `/health` | GET | — | Status + buffer usage |
+
+**Fields:** `level` (`debug`/`info`/`warn`/`error`), `source` (app name), `message` (text, required), `data` (optional JSON), `timestamp` (optional, ms)
+
+### Features
+
+- **Ring Buffer**: Fixed-size in-memory FIFO (default 10,000 entries) — oldest entries overwritten
+- **Zero-cost**: No server, no buffer, no resources until `init` is called
+- **Persistence**: Optional SQLite storage with 7-day auto-cleanup (`persist: true`)
+- **Consume pattern**: `query` with `consume: true` removes returned entries — ideal for polling
+- **Viewer integration**: Logs tab with WebSocket live-stream, level/source/text filters, auto-scroll
+- **Fire & forget**: Just POST and go — if the server isn't running, the POST silently fails
+
 ## Screenshots — LLM-Optimized
 
 Take screenshots and **reduce them up to 95%** for LLM context. A typical screenshot goes from ~100 KB to ~5 KB — that's thousands of tokens saved per image.
@@ -633,6 +698,8 @@ Opens `http://localhost:3333` with:
 - **File signatures** - Click any file to see its types and methods
 - **Live reload** - Changes detected automatically while you code
 - **Git status icons** - See which files are modified, staged, or untracked
+- **Logs tab** - Live log stream from Log Hub with filters (level, source, text search)
+- **Tasks tab** - View and manage your task backlog
 
 ![AiDex Viewer - Signatures](docs/aidex-viewer.png)
 

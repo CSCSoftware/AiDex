@@ -803,6 +803,10 @@ export function registerTools(): Tool[] {
                         type: 'number',
                         description: 'Max entries to return (default: 50, used with query)',
                     },
+                    consume: {
+                        type: 'boolean',
+                        description: 'If true, returned entries are removed from the buffer — ideal for polling without duplicates (default: false, used with query)',
+                    },
                     message: {
                         type: 'string',
                         description: 'Log message text (required for write)',
@@ -2516,6 +2520,7 @@ async function handleLog(args: Record<string, unknown>): Promise<{ content: Arra
         source: args.source as string | undefined,
         contains: args.contains as string | undefined,
         limit: args.limit as number | undefined,
+        consume: args.consume as boolean | undefined,
         message: args.message as string | undefined,
         data: args.data as string | undefined,
     });
@@ -2574,7 +2579,7 @@ async function handleLog(args: Record<string, unknown>): Promise<{ content: Arra
                 const time = new Date(e.timestamp).toISOString().slice(11, 23);
                 const icon = levelIcon[e.level] || '';
                 msg += `${icon} \`${time}\` **[${e.source}]** ${e.message}`;
-                if (e.data) msg += ` \`${e.data}\``;
+                if (e.data && e.data !== 'null') msg += ` \`${e.data}\``;
                 msg += '\n';
             }
             return { content: [{ type: 'text', text: msg.trimEnd() }] };

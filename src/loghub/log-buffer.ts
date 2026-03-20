@@ -53,9 +53,11 @@ export class LogBuffer {
         source?: string;
         contains?: string;
         limit?: number;
+        consume?: boolean;
     }): LogEntry[] {
         const limit = opts?.limit ?? 50;
         const results: LogEntry[] = [];
+        const matchedIndices: number[] = [];
 
         // Iterate backwards from most recent
         for (let i = 0; i < this.count && results.length < limit; i++) {
@@ -70,6 +72,16 @@ export class LogBuffer {
             if (opts?.contains && !entry.message.toLowerCase().includes(opts.contains.toLowerCase())) continue;
 
             results.push(entry);
+            if (opts?.consume) matchedIndices.push(idx);
+        }
+
+        // Remove consumed entries from buffer
+        if (opts?.consume && matchedIndices.length > 0) {
+            for (const idx of matchedIndices) {
+                this.buffer[idx] = null;
+            }
+            this.count -= matchedIndices.length;
+            if (this.count < 0) this.count = 0;
         }
 
         return results;

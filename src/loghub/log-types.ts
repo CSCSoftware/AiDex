@@ -37,6 +37,7 @@ export interface LogParams {
     source?: string;
     contains?: string;
     limit?: number;
+    consume?: boolean;      // If true, returned entries are removed from the buffer (poll pattern)
     // write
     message?: string;
     data?: string;

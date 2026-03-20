@@ -1209,6 +1209,12 @@ function getViewerHTML(projectPath: string): string {
             cursor: pointer; user-select: none;
         }
         .log-auto-scroll input { cursor: pointer; }
+        .log-clear-btn {
+            padding: 2px 10px; border: 1px solid var(--border); border-radius: 4px;
+            background: var(--bg-secondary); color: var(--text-muted); cursor: pointer;
+            font-size: 0.85em; margin-left: auto;
+        }
+        .log-clear-btn:hover { background: var(--accent-red); color: white; border-color: var(--accent-red); }
         .log-not-init {
             color: var(--text-muted);
             text-align: center;
@@ -1250,7 +1256,7 @@ function getViewerHTML(projectPath: string): string {
     </div>
 
     <script>
-        const ws = new WebSocket('ws://localhost:${PORT}');
+        let ws = new WebSocket('ws://localhost:${PORT}');
         let selectedNode = null;
         let currentFile = null;
         let currentTreeMode = 'code';
@@ -1261,6 +1267,17 @@ function getViewerHTML(projectPath: string): string {
 
         ws.onopen = () => {
             console.log('Connected to AiDex Viewer');
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket closed — reconnecting in 2s...');
+            setTimeout(() => {
+                const newWs = new WebSocket('ws://localhost:${PORT}');
+                newWs.onopen = ws.onopen;
+                newWs.onclose = ws.onclose;
+                newWs.onmessage = ws.onmessage;
+                ws = newWs;
+            }, 2000);
         };
 
         let cachedCodeTree = null;
@@ -1740,6 +1757,7 @@ function getViewerHTML(projectPath: string): string {
             html += '</select>';
             html += '<input type="text" id="logTextFilter" placeholder="Search..." oninput="logFilterText=this.value;filterLogEntries()">';
             html += '<label class="log-auto-scroll"><input type="checkbox" ' + (logAutoScroll ? 'checked' : '') + ' onchange="logAutoScroll=this.checked"> Auto-scroll</label>';
+            html += '<button class="log-clear-btn" onclick="clearLogs()" title="Clear all log entries">Clear</button>';
             html += '</div>';
 
             if (logEntries.length === 0) {
@@ -1810,10 +1828,16 @@ function getViewerHTML(projectPath: string): string {
             if (logAutoScroll) container.scrollTop = container.scrollHeight;
         }
 
+        function clearLogs() {
+            logEntries = [];
+            const container = document.getElementById('logEntries');
+            if (container) container.innerHTML = '';
+        }
+
         function formatLogEntry(e) {
             const time = new Date(e.timestamp).toISOString().slice(11, 23);
             const icon = logLevelIcon[e.level] || '';
-            const data = e.data ? ' <span class="log-data">' + escapeHtml(e.data) + '</span>' : '';
+            const data = (e.data && e.data !== 'null') ? ' <span class="log-data">' + escapeHtml(e.data) + '</span>' : '';
             return '<div class="log-entry-line level-' + e.level + '">'
                 + '<span class="log-time">' + time + '</span>'
                 + '<span class="log-level">' + icon + '</span>'
