@@ -4,6 +4,8 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-03-20
+
 ### Added
 - **Log Hub** (`aidex_log`): Universal logging system — any program (C#, Python, Node, etc.) sends logs via HTTP POST to AiDex, queryable by the LLM via MCP tool. Zero-cost when not used — no server, no buffer, no resources until `init` is called.
   - **HTTP Server** on port 3335 (configurable): `POST /log` (single), `POST /logs` (batch), `GET /health`
