@@ -5,13 +5,14 @@
  * Provides persistent code indexing for Claude Code.
  *
  * Usage:
- *   node build/index.js              - Start MCP server (default)
- *   node build/index.js scan <path>  - Scan for .aidex directories
- *   node build/index.js init <path>  - Index a project
+ *   node build/index.js                       - Start MCP server (default)
+ *   node build/index.js scan <path>           - Scan for .aidex directories
+ *   node build/index.js init <path>           - Index a project
+ *   node build/index.js global-init <path>    - Scan, index unindexed, register in global DB
  */
 
 import { createServer } from './server/mcp-server.js';
-import { scan, init } from './commands/index.js';
+import { scan, init, globalInit } from './commands/index.js';
 import { setupMcpClients, unsetupMcpClients } from './commands/setup.js';
 import { PRODUCT_NAME, PRODUCT_NAME_LOWER } from './constants.js';
 import { stopViewer } from './viewer/server.js';
@@ -76,6 +77,59 @@ async function main() {
         console.log(`  Types: ${result.typesFound}`);
         console.log(`  Time: ${result.durationMs}ms`);
 
+        return;
+    }
+
+    // CLI mode: global-init
+    if (args[0] === 'global-init') {
+        const searchPath = args[1];
+        if (!searchPath) {
+            console.error(`Usage: ${PRODUCT_NAME_LOWER} global-init <path> [--index-unindexed]`);
+            process.exit(1);
+        }
+
+        const indexUnindexed = args.includes('--index-unindexed');
+        const showProgress = args.includes('--show-progress');
+
+        console.log(`Scanning: ${searchPath}${indexUnindexed ? ' (will index unindexed projects)' : ''}${showProgress ? ' (with progress UI)' : ''}`);
+        const result = await globalInit({
+            path: searchPath,
+            indexUnindexed,
+            showProgress,
+        });
+
+        if (!result.success) {
+            console.error(`Error: ${result.error}`);
+            process.exit(1);
+        }
+
+        console.log(`Done!`);
+        console.log(`  Registered: ${result.registered}`);
+        console.log(`  New: ${result.newProjects}`);
+        console.log(`  Updated: ${result.updatedProjects}`);
+        console.log(`  Removed: ${result.removedProjects}`);
+
+        if (result.indexedResults && result.indexedResults.length > 0) {
+            const ok = result.indexedResults.filter(r => r.success).length;
+            const fail = result.indexedResults.filter(r => !r.success).length;
+            console.log(`  Indexed: ${ok} succeeded, ${fail} failed`);
+        }
+
+        if (result.unindexedProjects.length > 0) {
+            console.log(`\n  Unindexed projects found: ${result.unindexedProjects.length}`);
+            for (const p of result.unindexedProjects) {
+                console.log(`    ${p.name} (${p.path}) ~${p.estimatedFiles} files`);
+            }
+        }
+
+        if (result.largeProjects && result.largeProjects.length > 0) {
+            console.log(`\n  Large projects skipped (>500 files): ${result.largeProjects.length}`);
+            for (const p of result.largeProjects) {
+                console.log(`    ${p.name} (${p.path}) ~${p.estimatedFiles} files`);
+            }
+        }
+
+        console.log(`\n  Totals: ${result.totals.projects} projects | ${result.totals.files} files | ${result.totals.methods} methods | ${result.totals.types} types`);
         return;
     }
 
