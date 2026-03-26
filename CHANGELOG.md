@@ -4,6 +4,11 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+## [1.16.3] - 2026-03-26
+
+### Fixed
+- **Monorepo support**: Removed `**/packages/**` from `DEFAULT_EXCLUDE` — was incorrectly blocking indexing of JS/TS monorepo workspaces (pnpm, npm workspaces, etc.) ([#4](https://github.com/CSCSoftware/AiDex/issues/4))
+
 ## [1.16.2] - 2026-03-20
 
 ### Changed
