@@ -53,7 +53,6 @@ export interface InitResult {
 export const DEFAULT_EXCLUDE = [
     // Package managers
     '**/node_modules/**',
-    '**/packages/**',
     '**/vendor/**',          // PHP Composer, Go
     '**/vendor/bundle/**',   // Ruby Bundler
     // Build output
