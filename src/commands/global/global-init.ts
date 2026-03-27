@@ -194,17 +194,21 @@ export async function globalInit(params: GlobalInitParams): Promise<GlobalInitRe
 
         // Remove parent-duplicate projects already in the global DB
         // (from previous runs before deduplication was added)
+        // Only remove parents with DIRECT children (one level deeper)
         const allRegistered = globalDb.getProjects();
         const allPaths = allRegistered.map(p => ({
             id: p.id,
             path: p.path.replace(/\\/g, '/').replace(/\/+$/, '') + '/',
         }));
         for (const project of allPaths) {
-            const isParent = allPaths.some(other =>
-                other.id !== project.id &&
-                other.path.startsWith(project.path)
-            );
-            if (isParent) {
+            const hasDirectChild = allPaths.some(other => {
+                if (other.id === project.id) return false;
+                if (!other.path.startsWith(project.path)) return false;
+                const remainder = other.path.slice(project.path.length);
+                const segments = remainder.replace(/\/+$/, '').split('/');
+                return segments.length === 1;
+            });
+            if (hasDirectChild) {
                 globalDb.unregisterProject(project.path.replace(/\/+$/, ''));
                 removedCount++;
             }
@@ -505,11 +509,15 @@ function findUnindexedProjects(searchPath: string, maxDepth: number, indexedPath
 
 /**
  * Deduplicate projects: If project A is a parent directory of project B,
- * keep only B (the more specific sub-project).
+ * keep only B (the more specific sub-project) — but only when B is a
+ * DIRECT child of A (one level deeper).
  *
  * Example: Given paths [AudioGrabber/, AudioGrabber/AudioGrabber/, AudioGrabber/AudioGrabber2/]
- * → Remove AudioGrabber/ because it contains sub-projects.
+ * → Remove AudioGrabber/ because it has direct sub-projects.
  * → Keep AudioGrabber/AudioGrabber/ and AudioGrabber/AudioGrabber2/.
+ *
+ * Counter-example: [Aidex/, Aidex/SampleLangProjects/java-minimal-json/]
+ * → Keep Aidex/ because the sub-project is nested 2+ levels deep (not a direct child).
  */
 function deduplicateProjects<T extends { path: string; name: string }>(projects: T[]): T[] {
     // Normalize all paths
@@ -521,14 +529,19 @@ function deduplicateProjects<T extends { path: string; name: string }>(projects:
     // Sort by path length descending (deepest first)
     normalized.sort((a, b) => b._normPath.length - a._normPath.length);
 
-    // A project is a "parent" if any other project's path starts with it
+    // A project is a "parent" only if another project is a DIRECT child (one level deeper)
     const result: typeof projects = [];
     for (const project of normalized) {
-        const isParent = normalized.some(other =>
-            other !== project &&
-            other._normPath.startsWith(project._normPath)
-        );
-        if (!isParent) {
+        const hasDirectChild = normalized.some(other => {
+            if (other === project) return false;
+            if (!other._normPath.startsWith(project._normPath)) return false;
+            // Check if it's a direct child: the remaining path after the parent
+            // should contain no additional slashes (only "childName/")
+            const remainder = other._normPath.slice(project._normPath.length);
+            const segments = remainder.replace(/\/+$/, '').split('/');
+            return segments.length === 1;
+        });
+        if (!hasDirectChild) {
             result.push(project);
         }
     }
