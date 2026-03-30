@@ -166,6 +166,10 @@ The index lives in `.aidex/index.db` (SQLite) - fast, portable, no external depe
 - **Auto-Cleanup**: Excluded files (e.g., build outputs) are automatically removed from index
 - **Zero Dependencies**: SQLite with WAL mode — single file, fast, portable
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/cscsoftware-aidex).
+
 ## Supported Languages
 
 | Language | Extensions |
