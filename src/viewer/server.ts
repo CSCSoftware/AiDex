@@ -1177,10 +1177,11 @@ function getViewerHTML(projectPath: string): string {
         .log-level-btn.level-error.active { border-color: var(--accent-red); color: var(--accent-red); }
         .log-level-btn.level-warn.active { border-color: var(--accent-orange); color: var(--accent-orange); }
         .log-level-btn.level-info.active { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+        .log-level-btn.level-success.active { border-color: var(--accent-green); color: var(--accent-green); }
         .log-level-btn.level-debug.active { border-color: var(--text-muted); }
         .log-entries {
             flex: 1;
-            overflow-y: auto;
+            overflow: auto;
             background: var(--bg-secondary);
             border-radius: 6px;
             padding: 8px;
@@ -1193,15 +1194,17 @@ function getViewerHTML(projectPath: string): string {
             gap: 8px;
             padding: 1px 4px;
             border-radius: 2px;
+            white-space: nowrap;
         }
         .log-entry-line:hover { background: rgba(122, 162, 247, 0.08); }
         .log-entry-line .log-time { color: var(--text-muted); white-space: nowrap; min-width: 85px; }
         .log-entry-line .log-level { min-width: 16px; text-align: center; }
         .log-entry-line .log-src { color: var(--accent-purple); min-width: 60px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .log-entry-line .log-msg { color: var(--text-primary); flex: 1; word-break: break-word; }
-        .log-entry-line .log-data { color: var(--text-muted); font-size: 0.9em; }
+        .log-entry-line .log-msg { color: var(--text-primary); white-space: nowrap; }
+        .log-entry-line .log-data { color: var(--text-muted); font-size: 0.9em; white-space: nowrap; }
         .log-entry-line.level-error .log-msg { color: var(--accent-red); }
         .log-entry-line.level-warn .log-msg { color: var(--accent-orange); }
+        .log-entry-line.level-success .log-msg { color: var(--accent-green); }
         .log-entry-line.level-debug .log-msg { color: var(--text-muted); }
         .log-auto-scroll {
             display: flex; align-items: center; gap: 4px;
@@ -1725,7 +1728,7 @@ function getViewerHTML(projectPath: string): string {
         let logFilterText = '';
         let logViewInitialized = false;
 
-        const logLevelIcon = { debug: '\\u26AA', info: '\\u{1F535}', warn: '\\u{1F7E1}', error: '\\u{1F534}' };
+        const logLevelIcon = { debug: '\\u26AA', info: '\\u{1F535}', success: '\\u{1F7E2}', warn: '\\u{1F7E1}', error: '\\u{1F534}' };
 
         function handleLogEntry(entry) {
             logEntries.push(entry);
@@ -1750,6 +1753,7 @@ function getViewerHTML(projectPath: string): string {
             html += '<button class="log-level-btn level-error active" data-level="error" onclick="toggleLogLevel(this)">Error</button>';
             html += '<button class="log-level-btn level-warn active" data-level="warn" onclick="toggleLogLevel(this)">Warn</button>';
             html += '<button class="log-level-btn level-info active" data-level="info" onclick="toggleLogLevel(this)">Info</button>';
+            html += '<button class="log-level-btn level-success active" data-level="success" onclick="toggleLogLevel(this)">OK</button>';
             html += '<button class="log-level-btn level-debug active" data-level="debug" onclick="toggleLogLevel(this)">Debug</button>';
             html += '<select id="logSourceFilter" onchange="logFilterSource=this.value;filterLogEntries()">';
             html += '<option value="">All sources</option>';
@@ -1834,15 +1838,37 @@ function getViewerHTML(projectPath: string): string {
             if (container) container.innerHTML = '';
         }
 
+        // Color prefix: optional {color} at start of message, e.g. "{green}text" or "{#ff0}text"
+        // Also supports {bold}, {italic}, and combinations: "{green,bold}text"
+        const colorNames = { red:'var(--accent-red)', green:'var(--accent-green)', orange:'var(--accent-orange)',
+            yellow:'var(--accent-yellow)', cyan:'var(--accent-cyan)', purple:'var(--accent-purple)',
+            blue:'var(--accent)', white:'var(--text-primary)', muted:'var(--text-muted)' };
+
+        function parseColorPrefix(msg) {
+            const m = msg.match(/^\{([^}]+)\}/);
+            if (!m) return { msg, style: '' };
+            const parts = m[1].split(',').map(s => s.trim());
+            let style = '';
+            for (const p of parts) {
+                if (colorNames[p]) style += 'color:' + colorNames[p] + ';';
+                else if (p.startsWith('#')) style += 'color:' + p + ';';
+                else if (p === 'bold') style += 'font-weight:bold;';
+                else if (p === 'italic') style += 'font-style:italic;';
+            }
+            return { msg: msg.slice(m[0].length), style };
+        }
+
         function formatLogEntry(e) {
             const time = new Date(e.timestamp).toISOString().slice(11, 23);
             const icon = logLevelIcon[e.level] || '';
             const data = (e.data && e.data !== 'null') ? ' <span class="log-data">' + escapeHtml(e.data) + '</span>' : '';
+            const parsed = parseColorPrefix(e.message);
+            const msgStyle = parsed.style ? ' style="' + parsed.style + '"' : '';
             return '<div class="log-entry-line level-' + e.level + '">'
                 + '<span class="log-time">' + time + '</span>'
                 + '<span class="log-level">' + icon + '</span>'
                 + '<span class="log-src" title="' + escapeHtml(e.source) + '">' + escapeHtml(e.source) + '</span>'
-                + '<span class="log-msg">' + escapeHtml(e.message) + data + '</span>'
+                + '<span class="log-msg"' + msgStyle + '>' + escapeHtml(parsed.msg) + data + '</span>'
                 + '</div>';
         }
 

@@ -4,6 +4,18 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-04-07
+
+### Added
+- **Task Scheduler**: Tasks can now have due dates (`due`), repeat intervals (`interval`), actions (`task_action`), and auto-execute flag (`auto_go`)
+  - **Due dates**: Relative (`"3d"`, `"1w"`) or ISO date (`"2026-04-10"`)
+  - **Recurring tasks**: Automatically advance due date by interval after each trigger
+  - **One-shot tasks**: Due date cleared after trigger
+  - **Cross-project**: Overdue tasks reported at every `aidex_session` call — even from other projects
+  - **Global mirror**: `scheduled_tasks` table in `~/.aidex/global.db` for fast cross-project lookups
+  - **Auto-migration**: Existing databases get new columns automatically
+- **Test suite**: First tests for AiDex — 26 tests covering scheduler logic, task CRUD, global sync
+
 ## [1.16.3] - 2026-03-26
 
 ### Fixed

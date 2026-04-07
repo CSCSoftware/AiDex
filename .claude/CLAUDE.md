@@ -2,7 +2,7 @@
 
 MCP Server für persistentes Code-Indexing. Ermöglicht Claude Code schnelle, präzise Suchen statt Grep/Glob.
 
-**Version:** 1.16.3 | **Sprachen:** 11 | **Repo:** https://github.com/CSCSoftware/AiDex
+**Version:** 1.17.0 | **Sprachen:** 11 | **Repo:** https://github.com/CSCSoftware/AiDex
 
 ## Build & Run
 
@@ -77,8 +77,8 @@ Registriert als MCP Server `aidex` (Prefix: `mcp__aidex__aidex_*`).
 ### Task Backlog (v1.8+)
 | Tool | Beschreibung |
 |------|--------------|
-| `aidex_task` | Task CRUD + Log (create/read/update/delete/log) |
-| `aidex_tasks` | Tasks auflisten, filtern nach Status/Priority/Tag |
+| `aidex_task` | Task CRUD + Log + Scheduler (due/interval/action/auto_go) |
+| `aidex_tasks` | Tasks auflisten, filtern nach Status/Priority/Tag. Zeigt due-Daten + Intervalle |
 
 Status: `backlog → active → done | cancelled`
 
@@ -158,8 +158,9 @@ src/
 | `signatures` | Header-Kommentare |
 | `project_files` | Alle Dateien mit Typ |
 | `metadata` | Key-Value (Sessions, Notizen) |
-| `tasks` | Backlog-Tasks (Priority, Status, Tags) |
+| `tasks` | Backlog-Tasks (Priority, Status, Tags, Scheduling: due/interval/action/auto_go) |
 | `task_log` | Task-Historie (Auto-Log bei Änderungen) |
+| `scheduled_tasks` | Global Scheduler Mirror in ~/.aidex/global.db (project_path, task_id, due) |
 
 ## Wichtige Features
 
@@ -203,6 +204,17 @@ aidex_tasks({ path: ".", status: "active", tag: "bug" })    # Gefiltert
 - Status: backlog → active → done | cancelled
 - Auto-Log bei Status-Änderungen und Task-Erstellung
 - Viewer: Tasks-Tab mit Priority-Farben, Done-Toggle, Cancelled-Sektion (durchgestrichen)
+
+### Task Scheduler (v1.17)
+```
+aidex_task({ path: ".", action: "create", title: "Check PR", due: "3d", interval: "3d", task_action: "gh pr list" })
+aidex_task({ path: ".", action: "create", title: "One-shot", due: "1w" })
+```
+- Due: `"30m"`, `"2h"`, `"3d"`, `"1w"` oder ISO-Datum
+- Intervall: Automatisch weitergesetzt nach Trigger
+- One-Shot: `due` wird nach Trigger gelöscht
+- Cross-Project: Bei jedem `aidex_session` werden fällige Tasks aus ALLEN Projekten gemeldet
+- `auto_go: true`: Aktion wird automatisch ausgeführt
 
 ### Screenshots (v1.9, Optimierung v1.13)
 ```

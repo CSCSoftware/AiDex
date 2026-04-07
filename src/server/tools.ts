@@ -472,6 +472,22 @@ export function registerTools(): Tool[] {
                         type: 'string',
                         description: 'Log note text (required for log action)',
                     },
+                    due: {
+                        type: 'string',
+                        description: 'Due date: ISO date ("2026-04-10") or relative from now ("3d", "1w", "12h"). Set to "" to clear.',
+                    },
+                    interval: {
+                        type: 'string',
+                        description: 'Repeat interval after trigger: "30m", "2h", "3d", "1w". Omit or "" for one-shot.',
+                    },
+                    task_action: {
+                        type: 'string',
+                        description: 'What to do when triggered (description of the action to perform)',
+                    },
+                    auto_go: {
+                        type: 'boolean',
+                        description: 'If true, auto-execute the action on trigger. If false (default), just report.',
+                    },
                 },
                 required: ['path', 'action'],
             },
@@ -1854,6 +1870,31 @@ function handleSession(args: Record<string, unknown>): { content: Array<{ type: 
         message += result.note + '\n';
     }
 
+    // Task Scheduler
+    if (result.schedulerResult) {
+        message += '\n## ⏰ Task Scheduler\n';
+        if (result.schedulerResult.active) {
+            message += 'Task-Scheduler active.\n';
+            if (result.schedulerResult.dueTasks.length > 0) {
+                const priorityIcon: Record<number, string> = { 1: '🔴', 2: '🟡', 3: '⚪' };
+                message += `\n**${result.schedulerResult.dueTasks.length} task(s) due:**\n\n`;
+                for (const dt of result.schedulerResult.dueTasks) {
+                    const t = dt.task;
+                    message += `- [${dt.projectName}] ${priorityIcon[t.priority]} **#${t.id}** ${t.title}\n`;
+                    if (t.action) message += `  Action: ${t.action}\n`;
+                    if (t.interval) message += `  Repeats: every ${t.interval}\n`;
+                    if (dt.autoGo) message += `  ⚡ AUTO-EXECUTE\n`;
+                }
+            }
+        }
+        if (result.schedulerResult.errors.length > 0) {
+            message += '\nScheduler warnings:\n';
+            for (const err of result.schedulerResult.errors) {
+                message += `- ⚠️ ${err}\n`;
+            }
+        }
+    }
+
     return {
         content: [{ type: 'text', text: message.trimEnd() }],
     };
@@ -1925,6 +1966,10 @@ function handleTask(args: Record<string, unknown>): { content: Array<{ type: str
         source: args.source as string | undefined,
         sort_order: args.sort_order as number | undefined,
         note: args.note as string | undefined,
+        due: args.due as string | undefined,
+        interval: args.interval as string | undefined,
+        task_action: args.task_action as string | undefined,
+        auto_go: args.auto_go as boolean | undefined,
     });
 
     if (!result.success) {
@@ -1946,6 +1991,10 @@ function handleTask(args: Record<string, unknown>): { content: Array<{ type: str
             if (t.description) msg += `Description: ${t.description}\n`;
             if (t.tags) msg += `Tags: ${t.tags}\n`;
             if (t.source) msg += `Source: ${t.source}\n`;
+            if (t.due) msg += `Due: ${new Date(t.due).toISOString()}\n`;
+            if (t.interval) msg += `Interval: ${t.interval}\n`;
+            if (t.action) msg += `Action: ${t.action}\n`;
+            if (t.auto_go) msg += `Auto-execute: yes\n`;
             return { content: [{ type: 'text', text: msg.trimEnd() }] };
         }
         case 'read': {
@@ -1956,6 +2005,10 @@ function handleTask(args: Record<string, unknown>): { content: Array<{ type: str
             if (t.description) msg += `Description: ${t.description}\n`;
             if (t.tags) msg += `Tags: ${t.tags}\n`;
             if (t.source) msg += `Source: ${t.source}\n`;
+            if (t.due) msg += `Due: ${new Date(t.due).toISOString()}\n`;
+            if (t.interval) msg += `Interval: ${t.interval}\n`;
+            if (t.action) msg += `Action: ${t.action}\n`;
+            if (t.auto_go) msg += `Auto-execute: yes\n`;
             msg += `Created: ${new Date(t.created_at).toISOString()}\n`;
             if (t.completed_at) msg += `Completed: ${new Date(t.completed_at).toISOString()}\n`;
             if (result.log && result.log.length > 0) {
@@ -2028,6 +2081,12 @@ function handleTasks(args: Record<string, unknown>): { content: Array<{ type: st
         for (const t of items) {
             msg += `- ${priorityIcon[t.priority]} **#${t.id}** ${t.title}`;
             if (t.summary) msg += ` — ${t.summary}`;
+            if (t.due) {
+                const isOverdue = t.due <= Date.now();
+                const dueStr = new Date(t.due).toLocaleDateString();
+                msg += isOverdue ? ` ⏰ OVERDUE:${dueStr}` : ` ⏰ ${dueStr}`;
+                if (t.interval) msg += ` (every ${t.interval})`;
+            }
             if (t.tags) msg += ` [${t.tags}]`;
             msg += '\n';
         }

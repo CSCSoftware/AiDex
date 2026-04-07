@@ -42,6 +42,15 @@ export interface GlobalProject {
     registered_at: number;
 }
 
+export interface ScheduledTaskRow {
+    id: number;
+    project_path: string;
+    task_id: number;
+    due: number;
+    interval: string | null;
+    auto_go: number;
+}
+
 export interface ProjectStats {
     files: number;
     items: number;
@@ -323,6 +332,70 @@ export class GlobalDatabase {
     deleteGuideline(key: string): boolean {
         const result = this.db.prepare('DELETE FROM guidelines WHERE key = ?').run(key);
         return result.changes > 0;
+    }
+
+    // --------------------------------------------------------
+    // Scheduled Tasks (mirror/cache)
+    // --------------------------------------------------------
+
+    /**
+     * Upsert a scheduled task into the global mirror table.
+     */
+    upsertScheduledTask(projectPath: string, taskId: number, due: number, interval: string | null, autoGo: number): void {
+        this.db.prepare(`
+            INSERT INTO scheduled_tasks (project_path, task_id, due, interval, auto_go)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(project_path, task_id) DO UPDATE SET
+                due = excluded.due,
+                interval = excluded.interval,
+                auto_go = excluded.auto_go
+        `).run(normalizePath(projectPath), taskId, due, interval, autoGo);
+    }
+
+    /**
+     * Remove a scheduled task from the global mirror.
+     */
+    removeScheduledTask(projectPath: string, taskId: number): void {
+        this.db.prepare(
+            'DELETE FROM scheduled_tasks WHERE project_path = ? AND task_id = ?'
+        ).run(normalizePath(projectPath), taskId);
+    }
+
+    /**
+     * Remove all scheduled tasks for a project.
+     */
+    removeScheduledTasksByProject(projectPath: string): void {
+        this.db.prepare(
+            'DELETE FROM scheduled_tasks WHERE project_path = ?'
+        ).run(normalizePath(projectPath));
+    }
+
+    /**
+     * Get all scheduled tasks that are due (due <= now).
+     */
+    getDueScheduledTasks(now?: number): ScheduledTaskRow[] {
+        const ts = now ?? Date.now();
+        return this.db.prepare(
+            'SELECT * FROM scheduled_tasks WHERE due <= ? ORDER BY due ASC'
+        ).all(ts) as ScheduledTaskRow[];
+    }
+
+    /**
+     * Get all scheduled tasks (for status display).
+     */
+    getAllScheduledTasks(): ScheduledTaskRow[] {
+        return this.db.prepare(
+            'SELECT * FROM scheduled_tasks ORDER BY due ASC'
+        ).all() as ScheduledTaskRow[];
+    }
+
+    /**
+     * Update the due timestamp for a scheduled task (after interval advancement).
+     */
+    updateScheduledTaskDue(projectPath: string, taskId: number, newDue: number): void {
+        this.db.prepare(
+            'UPDATE scheduled_tasks SET due = ? WHERE project_path = ? AND task_id = ?'
+        ).run(newDue, normalizePath(projectPath), taskId);
     }
 
     // --------------------------------------------------------

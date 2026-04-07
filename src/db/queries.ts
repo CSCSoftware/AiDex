@@ -93,6 +93,10 @@ export interface TaskRow {
     created_at: number;
     updated_at: number;
     completed_at: number | null;
+    due: number | null;
+    interval: string | null;
+    action: string | null;
+    auto_go: number;
 }
 
 export interface TaskLogRow {
@@ -552,18 +556,22 @@ export class Queries {
         status: 'backlog' | 'active' | 'done' | 'cancelled',
         tags: string | null,
         source: string | null,
-        sortOrder: number
+        sortOrder: number,
+        due: number | null = null,
+        interval: string | null = null,
+        action: string | null = null,
+        autoGo: number = 0
     ): number {
         this._insertTask ??= this.db.prepare(
-            'INSERT INTO tasks (title, description, summary, priority, status, tags, source, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO tasks (title, description, summary, priority, status, tags, source, sort_order, created_at, updated_at, due, interval, action, auto_go) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         const now = Date.now();
-        const result = this._insertTask.run(title, description, summary, priority, status, tags, source, sortOrder, now, now);
+        const result = this._insertTask.run(title, description, summary, priority, status, tags, source, sortOrder, now, now, due, interval, action, autoGo);
         return result.lastInsertRowid as number;
     }
 
-    updateTask(id: number, fields: Partial<Pick<TaskRow, 'title' | 'description' | 'summary' | 'priority' | 'status' | 'tags' | 'source' | 'sort_order'>>): boolean {
-        const ALLOWED_FIELDS = new Set(['title', 'description', 'summary', 'status', 'priority', 'tags', 'source', 'sort_order', 'completed_at']);
+    updateTask(id: number, fields: Partial<Pick<TaskRow, 'title' | 'description' | 'summary' | 'priority' | 'status' | 'tags' | 'source' | 'sort_order' | 'due' | 'interval' | 'action' | 'auto_go'>>): boolean {
+        const ALLOWED_FIELDS = new Set(['title', 'description', 'summary', 'status', 'priority', 'tags', 'source', 'sort_order', 'completed_at', 'due', 'interval', 'action', 'auto_go']);
         const sets: string[] = [];
         const values: unknown[] = [];
         for (const [key, value] of Object.entries(fields)) {

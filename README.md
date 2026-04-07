@@ -30,7 +30,7 @@ AiDex is an MCP server that gives AI coding assistants instant access to your en
 | **Global Search** | `global_init`, `global_query`, `global_signatures`, `global_status`, `global_refresh` | Search across ALL your projects at once — "Have I ever written X?" |
 | **Guidelines** | `global_guideline` | Persistent AI instructions & coding conventions — shared across all projects |
 | **Sessions** | `session`, `note` | Track sessions, detect external changes, leave notes for next session (with searchable history) |
-| **Task Backlog** | `task`, `tasks` | Built-in task management with priorities, tags, and auto-logged history |
+| **Task Backlog** | `task`, `tasks` | Built-in task management with priorities, tags, auto-logged history, and **scheduled/recurring tasks** |
 | **Log Hub** | `log` | Universal log receiver — any program sends logs via HTTP, queryable by the AI, live in Viewer |
 | **Screenshots** | `screenshot`, `windows` | Cross-platform screen capture with LLM optimization — scale + color reduction saves up to 95% tokens |
 | **Viewer** | `viewer` | Interactive browser UI with file tree, signatures, tasks, logs, and live reload |
@@ -314,7 +314,7 @@ Do I want to search code?
 | Global Search | `aidex_global_init`, `aidex_global_query`, `aidex_global_signatures`, `aidex_global_status`, `aidex_global_refresh` | Search across ALL projects |
 | Guidelines | `aidex_global_guideline` | Persistent AI instructions & conventions (key-value, global) |
 | Sessions | `aidex_session`, `aidex_note` | Track sessions, leave notes (with searchable history) |
-| Tasks | `aidex_task`, `aidex_tasks` | Built-in backlog with priorities, tags, summaries, auto-logged history |
+| Tasks | `aidex_task`, `aidex_tasks` | Built-in backlog with priorities, tags, summaries, auto-logged history, scheduled/recurring tasks |
 | Log Hub | `aidex_log` | Universal log receiver — any program sends logs via HTTP, AI queries them, live in Viewer |
 | Screenshots | `aidex_screenshot`, `aidex_windows` | Screen capture with LLM optimization (scale + color reduction, no index needed) |
 | Viewer | `aidex_viewer` | Interactive browser UI with file tree, signatures, tasks, and live logs |
@@ -342,6 +342,9 @@ aidex_task({ path: ".", action: "create", title: "Fix bug", priority: 1, tags: "
 aidex_task({ path: ".", action: "update", id: 1, status: "done" })
 aidex_task({ path: ".", action: "log", id: 1, note: "Root cause found" })
 aidex_tasks({ path: ".", status: "active" })
+
+# Scheduled & recurring tasks
+aidex_task({ path: ".", action: "create", title: "Check PR status", due: "3d", interval: "3d", task_action: "gh pr list" })
 ```
 Priority: 1=high, 2=medium, 3=low | Status: `backlog → active → done | cancelled`
 
@@ -492,12 +495,32 @@ aidex_task({ path: ".", action: "log", id: 1, note: "Root cause: unbounded buffe
 aidex_tasks({ path: ".", status: "active" })
 ```
 
+### Scheduled & Recurring Tasks
+
+Tasks can have due dates and repeat intervals. Overdue tasks are reported at every session start across ALL projects:
+
+```
+# One-shot: remind in 3 days
+aidex_task({ path: ".", action: "create", title: "Review PR", due: "3d", task_action: "Check if PR was submitted" })
+
+# Recurring: check every week
+aidex_task({ path: ".", action: "create", title: "Check dependencies", due: "1w", interval: "1w", task_action: "npm outdated" })
+
+# Auto-execute: runs the action automatically when due
+aidex_task({ path: ".", action: "create", title: "Refresh stats", due: "1d", interval: "1d", auto_go: true })
+```
+
+**Due formats:** Relative (`"30m"`, `"2h"`, `"3d"`, `"1w"`) or ISO date (`"2026-04-10"`)
+
+At every `aidex_session` call, the **Task Scheduler** checks `~/.aidex/global.db` for due tasks across all projects — even if you're working on a different project. Recurring tasks automatically advance their due date after each trigger.
+
 **Features:**
 - **Summaries**: One-sentence table-of-contents per task — scan the backlog without reading full details
 - **Priorities**: 🔴 high, 🟡 medium, ⚪ low
 - **Statuses**: `backlog → active → done | cancelled`
 - **Tags**: Categorize tasks (`bug`, `feature`, `docs`, etc.)
 - **History log**: Every status change is auto-logged, plus manual notes
+- **Scheduling**: Due dates, recurring intervals, actions, auto-execute across all projects
 - **Viewer integration**: Tasks tab in the browser viewer with live updates
 - **Persistent**: Tasks survive between sessions, stored in `.aidex/index.db`
 

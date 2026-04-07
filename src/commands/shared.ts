@@ -73,3 +73,48 @@ export function withProjectDb<T>(
     }
     return withDatabase(dbPath, readonly, fn);
 }
+
+// ============================================================
+// Interval / Due Date Parsing
+// ============================================================
+
+/**
+ * Parse an interval string to milliseconds.
+ * Supports: "30m" (minutes), "2h" (hours), "3d" (days), "1w" (weeks)
+ */
+export function parseIntervalToMs(interval: string): number | null {
+    const match = interval.match(/^(\d+)([mhdw])$/i);
+    if (!match) return null;
+
+    const value = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+
+    switch (unit) {
+        case 'm': return value * 60 * 1000;
+        case 'h': return value * 60 * 60 * 1000;
+        case 'd': return value * 24 * 60 * 60 * 1000;
+        case 'w': return value * 7 * 24 * 60 * 60 * 1000;
+        default:  return null;
+    }
+}
+
+/**
+ * Parse a due date input to a timestamp.
+ * - Relative: "3d" = 3 days from now (future)
+ * - ISO date: "2026-04-10" or "2026-04-10T14:00:00Z"
+ */
+export function parseDueDate(input: string): number | null {
+    if (!input) return null;
+
+    // Relative: "3d" means 3 days from now
+    const ms = parseIntervalToMs(input);
+    if (ms) return Date.now() + ms;
+
+    // ISO date string
+    const date = new Date(input);
+    if (!isNaN(date.getTime())) {
+        return date.getTime();
+    }
+
+    return null;
+}

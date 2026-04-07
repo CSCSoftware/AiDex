@@ -9,7 +9,8 @@
 import type { AiDexDatabase } from '../db/index.js';
 import type { TaskRow, TaskLogRow } from '../db/index.js';
 import { broadcastTaskUpdate } from '../viewer/server.js';
-import { validateIndex, noIndexError, withDatabase } from './shared.js';
+import { validateIndex, noIndexError, withDatabase, normalizePath, parseDueDate } from './shared.js';
+import { GlobalDatabase, globalDbExists } from '../db/global-database.js';
 
 // ============================================================
 // Types
@@ -30,6 +31,11 @@ export interface TaskParams {
     source?: string;
     sort_order?: number;
     note?: string;
+    // Scheduler fields
+    due?: string;            // ISO date or relative ("3d", "1w")
+    interval?: string;       // repeat interval ("3d", "1w", "12h")
+    task_action?: string;    // what to do when triggered (DB column: action)
+    auto_go?: boolean;       // auto-execute on trigger
 }
 
 export interface TaskResult {
@@ -71,7 +77,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    completed_at INTEGER
+    completed_at INTEGER,
+    due INTEGER,
+    interval TEXT,
+    action TEXT,
+    auto_go INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
@@ -100,7 +110,11 @@ CREATE TABLE IF NOT EXISTS tasks_new (
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    completed_at INTEGER
+    completed_at INTEGER,
+    due INTEGER,
+    interval TEXT,
+    action TEXT,
+    auto_go INTEGER DEFAULT 0
 );
 INSERT INTO tasks_new (id, title, description, priority, status, tags, source, sort_order, created_at, updated_at, completed_at)
     SELECT id, title, description, priority, status, tags, source, sort_order, created_at, updated_at, completed_at FROM tasks;
@@ -108,9 +122,10 @@ DROP TABLE tasks;
 ALTER TABLE tasks_new RENAME TO tasks;
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
+CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due);
 `;
 
-function ensureTaskTables(db: AiDexDatabase): void {
+export function ensureTaskTables(db: AiDexDatabase): void {
     const sqlite = db.getDb();
     sqlite.exec(TASKS_MIGRATION);
 
@@ -126,6 +141,48 @@ function ensureTaskTables(db: AiDexDatabase): void {
     ).get() as { cnt: number };
     if (hasSummary.cnt === 0) {
         sqlite.exec('ALTER TABLE tasks ADD COLUMN summary TEXT');
+    }
+
+    // Add scheduler columns if missing (for existing DBs before v1.17)
+    for (const col of ['due', 'interval', 'action', 'auto_go']) {
+        const has = sqlite.prepare(
+            "SELECT COUNT(*) as cnt FROM pragma_table_info('tasks') WHERE name = ?"
+        ).get(col) as { cnt: number };
+        if (has.cnt === 0) {
+            const type = (col === 'due' || col === 'auto_go') ? 'INTEGER' : 'TEXT';
+            const def = col === 'auto_go' ? ' DEFAULT 0' : '';
+            sqlite.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${type}${def}`);
+        }
+    }
+    // Ensure due index exists
+    sqlite.exec('CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due)');
+}
+
+/**
+ * Sync a task's scheduling state to the global scheduled_tasks mirror.
+ */
+function syncScheduleToGlobal(projectPath: string, taskId: number, task: TaskRow | undefined): void {
+    if (!globalDbExists()) return;
+
+    try {
+        const globalDb = new GlobalDatabase();
+        try {
+            if (!task || task.status === 'done' || task.status === 'cancelled' || task.due == null) {
+                globalDb.removeScheduledTask(projectPath, taskId);
+            } else {
+                globalDb.upsertScheduledTask(
+                    projectPath,
+                    taskId,
+                    task.due,
+                    task.interval ?? null,
+                    task.auto_go ?? 0
+                );
+            }
+        } finally {
+            globalDb.close();
+        }
+    } catch {
+        // Silently ignore global sync errors — project DB is source of truth
     }
 }
 
@@ -155,6 +212,14 @@ export function task(params: TaskParams): TaskResult {
                         if (!params.title) {
                             return { success: false, action, error: 'title is required for create' };
                         }
+                        // Parse due date
+                        let dueTs: number | null = null;
+                        if (params.due) {
+                            dueTs = parseDueDate(params.due);
+                            if (dueTs === null) {
+                                return { success: false, action, error: `Invalid due date: "${params.due}". Use ISO date or relative (e.g., "3d", "1w")` };
+                            }
+                        }
                         const id = queries.insertTask(
                             params.title,
                             params.description ?? null,
@@ -163,11 +228,17 @@ export function task(params: TaskParams): TaskResult {
                             params.status ?? 'backlog',
                             params.tags ?? null,
                             params.source ?? null,
-                            params.sort_order ?? 0
+                            params.sort_order ?? 0,
+                            dueTs,
+                            params.interval ?? null,
+                            params.task_action ?? null,
+                            params.auto_go ? 1 : 0
                         );
                         const created = queries.getTaskById(id);
                         // Auto-log creation
                         queries.insertTaskLog(id, `Task created: ${params.title}`);
+                        // Sync schedule to global
+                        syncScheduleToGlobal(projectPath, id, created);
                         return { success: true, action, task: created };
                     }
 
@@ -196,6 +267,21 @@ export function task(params: TaskParams): TaskResult {
                         if (params.tags !== undefined) fields.tags = params.tags;
                         if (params.source !== undefined) fields.source = params.source;
                         if (params.sort_order !== undefined) fields.sort_order = params.sort_order;
+                        // Scheduler fields
+                        if (params.due !== undefined) {
+                            if (params.due === '' || params.due === null) {
+                                fields.due = null;
+                            } else {
+                                const dueTs = parseDueDate(params.due);
+                                if (dueTs === null) {
+                                    return { success: false, action, error: `Invalid due date: "${params.due}"` };
+                                }
+                                fields.due = dueTs;
+                            }
+                        }
+                        if (params.interval !== undefined) fields.interval = params.interval || null;
+                        if (params.task_action !== undefined) fields.action = params.task_action || null;
+                        if (params.auto_go !== undefined) fields.auto_go = params.auto_go ? 1 : 0;
 
                         const updated = queries.updateTask(params.id, fields);
                         if (!updated) {
@@ -208,6 +294,8 @@ export function task(params: TaskParams): TaskResult {
                         }
 
                         const t = queries.getTaskById(params.id);
+                        // Sync schedule to global
+                        syncScheduleToGlobal(projectPath, params.id, t);
                         return { success: true, action, task: t };
                     }
 
@@ -215,6 +303,8 @@ export function task(params: TaskParams): TaskResult {
                         if (!params.id) {
                             return { success: false, action, error: 'id is required for delete' };
                         }
+                        // Remove from global mirror before deleting
+                        syncScheduleToGlobal(projectPath, params.id, undefined);
                         const deleted = queries.deleteTask(params.id);
                         if (!deleted) {
                             return { success: false, action, error: `Task #${params.id} not found` };

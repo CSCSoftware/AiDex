@@ -679,6 +679,10 @@ Manage a single task in the project backlog. Tasks persist in the AiDex database
 | `source` | string | - | Where the task came from (e.g., `"code review of parser.ts:142"`) |
 | `sort_order` | number | - | Sort order within same priority (lower = first, default: 0) |
 | `note` | string | for log | Log note text |
+| `due` | string | - | Due date: ISO date (`"2026-04-10"`) or relative from now (`"3d"`, `"1w"`, `"12h"`). Set to `""` to clear. |
+| `interval` | string | - | Repeat interval after trigger: `"30m"`, `"2h"`, `"3d"`, `"1w"`. Omit or `""` for one-shot. |
+| `task_action` | string | - | What to do when triggered (description of the action to perform) |
+| `auto_go` | boolean | - | If `true`, auto-execute the action on trigger. Default: `false`. |
 
 **Actions:**
 
@@ -691,6 +695,8 @@ Manage a single task in the project backlog. Tasks persist in the AiDex database
 | `log` | `id`, `note` | Add a note to the task history |
 
 **Auto-logging:** Status changes and task creation are automatically recorded in the task history.
+
+**Task Scheduler:** Tasks with `due` dates are tracked globally in `~/.aidex/global.db`. At every `aidex_session` call, overdue tasks from ALL projects are reported. Recurring tasks (`interval` set) automatically advance their due date. Setting a task to `done`/`cancelled` or clearing `due` removes it from the scheduler.
 
 **Examples:**
 ```json
@@ -713,6 +719,32 @@ Manage a single task in the project backlog. Tasks persist in the AiDex database
 
 // Add a log note
 { "path": ".", "action": "log", "id": 1, "note": "Root cause found: unbounded buffer" }
+
+// Create a recurring task — check every 3 days
+{
+  "path": ".", "action": "create",
+  "title": "Check PR status",
+  "due": "3d", "interval": "3d",
+  "task_action": "gh pr list --state open"
+}
+
+// One-shot reminder in 1 week
+{
+  "path": ".", "action": "create",
+  "title": "Follow up on review",
+  "due": "1w"
+}
+
+// Auto-execute task
+{
+  "path": ".", "action": "create",
+  "title": "Refresh project stats",
+  "due": "1d", "interval": "1d",
+  "auto_go": true
+}
+
+// Clear a task's schedule
+{ "path": ".", "action": "update", "id": 3, "due": "" }
 ```
 
 ---
@@ -735,6 +767,8 @@ List and filter tasks in the project backlog. Returns tasks grouped by status an
 - Priority icons: 🔴 high, 🟡 medium, ⚪ low
 - Task summaries shown inline (one-sentence table-of-contents)
 - Tags displayed inline
+- Due dates shown with ⏰ indicator (OVERDUE if past due)
+- Recurring intervals displayed inline
 
 **Examples:**
 ```json

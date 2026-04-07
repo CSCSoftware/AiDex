@@ -16,6 +16,7 @@ import { update } from './update.js';
 import { DEFAULT_EXCLUDE, readGitignore, shortHash } from './init.js';
 import { validateIndex, noIndexError, withProjectDb } from './shared.js';
 import { PRODUCT_VERSION } from '../constants.js';
+import { checkScheduledTasks, type SchedulerResult } from './global/global-scheduler.js';
 
 // ============================================================
 // Types
@@ -50,6 +51,7 @@ export interface SessionResult {
     reindexed: string[];
     note: string | null;
     updateInfo: UpdateInfo | null;
+    schedulerResult: SchedulerResult | null;
     error?: string;
 }
 
@@ -92,7 +94,7 @@ export function session(params: SessionParams): SessionResult {
 
     return withProjectDb(
         projectPath, false,
-        (error) => ({ success: false, isNewSession: false, sessionInfo: { lastSessionStart: null, lastSessionEnd: null, currentSessionStart: null }, externalChanges: [], reindexed: [], note: null, updateInfo: null, error }),
+        (error) => ({ success: false, isNewSession: false, sessionInfo: { lastSessionStart: null, lastSessionEnd: null, currentSessionStart: null }, externalChanges: [], reindexed: [], note: null, updateInfo: null, schedulerResult: null, error }),
         (db, queries) => {
             try {
                 const now = Date.now();
@@ -172,6 +174,14 @@ export function session(params: SessionParams): SessionResult {
                     db.setMetadata(KEY_LAST_SEEN_VERSION, PRODUCT_VERSION);
                 }
 
+                // Check global scheduled tasks
+                let schedulerResult: SchedulerResult | null = null;
+                try {
+                    schedulerResult = checkScheduledTasks();
+                } catch {
+                    // Don't let scheduler errors break session
+                }
+
                 return {
                     success: true,
                     isNewSession,
@@ -180,6 +190,7 @@ export function session(params: SessionParams): SessionResult {
                     reindexed,
                     note,
                     updateInfo,
+                    schedulerResult,
                 };
 
             } catch (error) {
@@ -191,6 +202,7 @@ export function session(params: SessionParams): SessionResult {
                     reindexed: [],
                     note: null,
                     updateInfo: null,
+                    schedulerResult: null,
                     error: error instanceof Error ? error.message : String(error),
                 };
             }

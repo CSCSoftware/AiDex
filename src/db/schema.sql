@@ -142,11 +142,16 @@ CREATE TABLE IF NOT EXISTS tasks (
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    completed_at INTEGER
+    completed_at INTEGER,
+    due INTEGER,
+    interval TEXT,
+    action TEXT,
+    auto_go INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
+CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due);
 
 -- ------------------------------------------------------------
 -- Task Log (History/Notizen pro Task)

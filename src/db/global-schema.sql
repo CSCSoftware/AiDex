@@ -48,3 +48,18 @@ CREATE TABLE IF NOT EXISTS guidelines (
 );
 
 CREATE INDEX IF NOT EXISTS idx_guidelines_key ON guidelines(key);
+
+-- ------------------------------------------------------------
+-- Scheduled Tasks (Mirror/Cache für schnelle Cross-Project Lookups)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_path TEXT NOT NULL,
+    task_id INTEGER NOT NULL,
+    due INTEGER NOT NULL,
+    interval TEXT,
+    auto_go INTEGER DEFAULT 0,
+    UNIQUE(project_path, task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_tasks(due);
