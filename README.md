@@ -728,7 +728,13 @@ Opens `http://localhost:3333` with:
 
 ![AiDex Viewer - Signatures](docs/aidex-viewer.png)
 
+![AiDex Viewer - Overview](docs/aidex-viewer-overview.png)
+
 ![AiDex Viewer - Code](docs/aidex-viewer-code.png)
+
+![AiDex Viewer - Tasks](docs/aidex-viewer-tasks.png)
+
+![AiDex Viewer - Logs](docs/aidex-viewer-logs.png)
 
 Close with `aidex_viewer({ path: ".", action: "close" })`
 

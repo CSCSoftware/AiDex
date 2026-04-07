@@ -661,13 +661,22 @@ function getTasksFromDb(db: Database.Database): unknown[] {
                 completed_at INTEGER
             );
         `);
-        // Add summary column if missing (for existing DBs before v1.15)
+        // Add missing columns for existing DBs (auto-migration)
         try {
-            const hasSummary = db.prepare(
-                "SELECT COUNT(*) as cnt FROM pragma_table_info('tasks') WHERE name = 'summary'"
-            ).get() as { cnt: number };
-            if (hasSummary.cnt === 0) {
-                db.exec('ALTER TABLE tasks ADD COLUMN summary TEXT');
+            const migrations: Array<[string, string, string]> = [
+                ['summary', 'TEXT', ''],
+                ['due', 'INTEGER', ''],
+                ['interval', 'TEXT', ''],
+                ['action', 'TEXT', ''],
+                ['auto_go', 'INTEGER', ' DEFAULT 0'],
+            ];
+            for (const [col, type, def] of migrations) {
+                const has = db.prepare(
+                    "SELECT COUNT(*) as cnt FROM pragma_table_info('tasks') WHERE name = ?"
+                ).get(col) as { cnt: number };
+                if (has.cnt === 0) {
+                    db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${type}${def}`);
+                }
             }
         } catch { /* ignore */ }
         return db.prepare(
@@ -1077,6 +1086,9 @@ function getViewerHTML(projectPath: string): string {
         .task-description { font-size: 0.85em; color: var(--text-secondary); margin-top: 4px; }
         .task-meta { font-size: 0.8em; color: var(--text-muted); margin-top: 6px; display: flex; gap: 12px; }
         .task-tags { color: var(--accent-cyan); font-size: 0.8em; margin-top: 4px; }
+        .task-schedule { font-size: 0.8em; margin-top: 4px; color: var(--accent-yellow); }
+        .task-schedule.overdue { color: var(--accent-red); font-weight: 600; }
+        .task-schedule .schedule-icon { margin-right: 4px; }
         .task-section-header {
             color: var(--accent-purple);
             font-size: 1em;
@@ -1701,6 +1713,20 @@ function getViewerHTML(projectPath: string): string {
             html += '<div class="task-meta">' + meta.map(m => '<span>' + m + '</span>').join('') + '</div>';
             if (t.tags) {
                 html += '<div class="task-tags">' + t.tags.split(',').map(s => '#' + escapeHtml(s.trim())).join(' ') + '</div>';
+            }
+            if (t.due) {
+                const dueDate = new Date(t.due);
+                const isOverdue = t.due <= Date.now();
+                const dueStr = dueDate.toLocaleDateString() + ' ' + dueDate.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+                html += '<div class="task-schedule' + (isOverdue ? ' overdue' : '') + '">';
+                html += '<span class="schedule-icon">' + (isOverdue ? '\\u{1F6A8}' : '\\u23F0') + '</span>';
+                html += (isOverdue ? 'OVERDUE: ' : 'Due: ') + dueStr;
+                if (t.interval) html += ' (every ' + escapeHtml(t.interval) + ')';
+                if (t.auto_go) html += ' \\u26A1 auto';
+                html += '</div>';
+            }
+            if (t.action) {
+                html += '<div style="font-size:0.8em;color:var(--text-muted);margin-top:2px">\\u{1F3AF} ' + escapeHtml(t.action) + '</div>';
             }
             if (t.status !== 'done' && t.status !== 'cancelled') {
                 html += '<div class="task-actions">';
