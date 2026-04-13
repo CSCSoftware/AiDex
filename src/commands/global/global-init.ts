@@ -199,8 +199,11 @@ export async function globalInit(params: GlobalInitParams): Promise<GlobalInitRe
         const allPaths = allRegistered.map(p => ({
             id: p.id,
             path: p.path.replace(/\\/g, '/').replace(/\/+$/, '') + '/',
+            files_count: p.files_count,
         }));
         for (const project of allPaths) {
+            // Skip projects that have their own files — they are real projects, not wrappers
+            if (project.files_count > 0) continue;
             const hasDirectChild = allPaths.some(other => {
                 if (other.id === project.id) return false;
                 if (!other.path.startsWith(project.path)) return false;
@@ -519,7 +522,7 @@ function findUnindexedProjects(searchPath: string, maxDepth: number, indexedPath
  * Counter-example: [Aidex/, Aidex/SampleLangProjects/java-minimal-json/]
  * → Keep Aidex/ because the sub-project is nested 2+ levels deep (not a direct child).
  */
-function deduplicateProjects<T extends { path: string; name: string }>(projects: T[]): T[] {
+function deduplicateProjects<T extends { path: string; name: string; files?: number }>(projects: T[]): T[] {
     // Normalize all paths
     const normalized = projects.map(p => ({
         ...p,
@@ -530,6 +533,7 @@ function deduplicateProjects<T extends { path: string; name: string }>(projects:
     normalized.sort((a, b) => b._normPath.length - a._normPath.length);
 
     // A project is a "parent" only if another project is a DIRECT child (one level deeper)
+    // BUT: keep parents that have their own indexed files (they are real projects, not just wrappers)
     const result: typeof projects = [];
     for (const project of normalized) {
         const hasDirectChild = normalized.some(other => {
@@ -541,7 +545,9 @@ function deduplicateProjects<T extends { path: string; name: string }>(projects:
             const segments = remainder.replace(/\/+$/, '').split('/');
             return segments.length === 1;
         });
-        if (!hasDirectChild) {
+        // Keep the project if it has no direct children, OR if it has its own files
+        // (a project with files is a real project, not just a wrapper directory)
+        if (!hasDirectChild || (project.files != null && project.files > 0)) {
             result.push(project);
         }
     }
