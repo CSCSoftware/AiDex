@@ -482,6 +482,7 @@ export function readProjectStats(projectPath: string): ProjectStats | null {
             '.rs': 'Rust', '.py': 'Python', '.pyw': 'Python',
             '.c': 'C', '.h': 'C', '.cpp': 'C++', '.cc': 'C++', '.cxx': 'C++', '.hpp': 'C++', '.hxx': 'C++',
             '.java': 'Java', '.go': 'Go', '.php': 'PHP', '.rb': 'Ruby', '.rake': 'Ruby',
+            '.tf': 'HCL/Terraform', '.tfvars': 'HCL/Terraform', '.hcl': 'HCL/Terraform',
         };
 
         const languages = [...new Set(

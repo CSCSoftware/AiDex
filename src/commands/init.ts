@@ -87,6 +87,7 @@ export const DEFAULT_EXCLUDE = [
     '**/.next/**',           // Next.js
     '**/coverage/**',        // Test coverage
     '**/tmp/**',             // Ruby, temp files
+    '**/.terraform/**',      // Terraform downloaded modules + state cache
     // Generated files
     '**/*.min.js',
     '**/*.generated.*',
@@ -127,7 +128,8 @@ const CODE_EXTENSIONS = new Set([
     '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
     '.cs', '.rs', '.py', '.pyw',
     '.c', '.h', '.cpp', '.cc', '.cxx', '.hpp', '.hxx',
-    '.java', '.go', '.php', '.rb', '.rake'
+    '.java', '.go', '.php', '.rb', '.rake',
+    '.tf', '.tfvars', '.hcl',
 ]);
 
 const CONFIG_EXTENSIONS = new Set([

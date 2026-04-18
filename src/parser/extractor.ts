@@ -106,6 +106,21 @@ export function extract(sourceCode: string, filePath: string): ExtractionResult 
             if (typeInfo) {
                 types.push(typeInfo);
                 setLineType(lineNumber, 'struct');
+
+                // HCL: block labels are in a composed name (e.g. "resource.aws_instance.web").
+                // Index each label part as an item so `aidex_query` finds the declaration
+                // even when the label is only referenced here (e.g. a never-used module).
+                // Skip the first part (block type keyword like "resource"); index the rest
+                // unconditionally — labels like "default" or "root" are user-chosen names
+                // that happen to collide with HCL_KEYWORDS, but are meaningful here.
+                if (language === 'hcl' && node.type === 'block') {
+                    const parts = typeInfo.name.split('.');
+                    for (let i = 1; i < parts.length; i++) {
+                        if (parts[i].length >= 2) {
+                            items.push({ term: parts[i], lineNumber, lineType: 'struct' });
+                        }
+                    }
+                }
             }
         }
 
@@ -115,7 +130,11 @@ export function extract(sourceCode: string, filePath: string): ExtractionResult 
             const methodInfo = extractMethodInfo(node, language, sourceLines);
             if (methodInfo) {
                 methods.push(methodInfo);
-                setLineType(lineNumber, 'method');
+                // HCL function_call is a usage (inside an attribute expression), not a definition.
+                // Don't overwrite the enclosing attribute's 'property' line type.
+                if (!(language === 'hcl' && node.type === 'function_call')) {
+                    setLineType(lineNumber, 'method');
+                }
             }
         }
 
@@ -244,6 +263,29 @@ function extractIdentifiersFromComment(
  * Extract type information from a type declaration node
  */
 function extractTypeInfo(node: Parser.SyntaxNode, language: SupportedLanguage): ExtractedType | null {
+    // HCL blocks: compose name from block type keyword + string labels
+    // e.g. `resource "aws_instance" "web"` → `resource.aws_instance.web`
+    if (language === 'hcl' && node.type === 'block') {
+        const parts: string[] = [];
+        for (const child of node.children) {
+            if (child.type === 'identifier') {
+                parts.push(child.text);
+            } else if (child.type === 'string_lit') {
+                // Grammar guarantees string_lit for block labels is wrapped in double quotes
+                parts.push(child.text.slice(1, -1));
+            } else if (child.type === 'block_start') {
+                break;
+            }
+        }
+        if (parts.length > 0) {
+            return {
+                name: parts.join('.'),
+                kind: 'type',
+                lineNumber: node.startPosition.row + 1,
+            };
+        }
+    }
+
     // Find the name child
     const nameNode = node.children.find(c =>
         c.type === 'identifier' || c.type === 'type_identifier' || c.type === 'name'

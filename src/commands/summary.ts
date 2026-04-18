@@ -234,6 +234,9 @@ function detectLanguages(queries: ReturnType<typeof createQueries>): string[] {
         '.go': 'Go',
         '.php': 'PHP',
         '.rb': 'Ruby',
+        '.tf': 'HCL/Terraform',
+        '.tfvars': 'HCL/Terraform',
+        '.hcl': 'HCL/Terraform',
     };
 
     const languages = new Set<string>();

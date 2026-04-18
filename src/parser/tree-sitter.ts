@@ -15,10 +15,11 @@ import Java from 'tree-sitter-java';
 import Go from 'tree-sitter-go';
 import Php from 'tree-sitter-php';
 import Ruby from 'tree-sitter-ruby';
+import Hcl from '@tree-sitter-grammars/tree-sitter-hcl';
 
 export type SupportedLanguage =
     | 'csharp' | 'typescript' | 'javascript' | 'rust' | 'python'
-    | 'c' | 'cpp' | 'java' | 'go' | 'php' | 'ruby';
+    | 'c' | 'cpp' | 'java' | 'go' | 'php' | 'ruby' | 'hcl';
 
 // Grammar packages export types incompatible with tree-sitter 0.25's Parser.Language interface.
 // All grammars work at runtime via NAPI — this is a type declaration mismatch only.
@@ -37,6 +38,7 @@ const GRAMMAR_MAP: Record<string, Parser.Language> = {
     go: asLang(Go),
     php: asLang(Php.php),
     ruby: asLang(Ruby),
+    hcl: asLang(Hcl),
     tsx: asLang(TypeScript.tsx),
     jsx: asLang(TypeScript.tsx), // tsx grammar handles JSX too
 };
@@ -65,6 +67,9 @@ const EXTENSION_MAP: Record<string, SupportedLanguage> = {
     '.php': 'php',
     '.rb': 'ruby',
     '.rake': 'ruby',
+    '.tf': 'hcl',
+    '.tfvars': 'hcl',
+    '.hcl': 'hcl',
 };
 
 // Cached parsers per language (includes 'tsx' and 'jsx' as virtual keys)

@@ -13,6 +13,7 @@ import * as java from './java.js';
 import * as go from './go.js';
 import * as php from './php.js';
 import * as ruby from './ruby.js';
+import * as hcl from './hcl.js';
 
 export interface LanguageConfig {
     isKeyword: (term: string) => boolean;
@@ -102,6 +103,14 @@ const configs: Record<SupportedLanguage, LanguageConfig> = {
         commentNodes: ruby.RUBY_COMMENT_NODES,
         methodNodes: ruby.RUBY_METHOD_NODES,
         typeNodes: ruby.RUBY_TYPE_NODES,
+    },
+    hcl: {
+        isKeyword: hcl.isKeyword,
+        identifierNodes: hcl.HCL_IDENTIFIER_NODES,
+        commentNodes: hcl.HCL_COMMENT_NODES,
+        methodNodes: hcl.HCL_METHOD_NODES,
+        typeNodes: hcl.HCL_TYPE_NODES,
+        propertyNodes: hcl.HCL_PROPERTY_NODES,
     },
 };
 

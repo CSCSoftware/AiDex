@@ -90,6 +90,8 @@ const PROJECT_MARKERS = [
     'composer.json',
     // C/C++
     'CMakeLists.txt', 'Makefile', 'meson.build',
+    // HCL/Terraform
+    '*.tf', '.terraform.lock.hcl',
 ];
 
 /** Glob-style markers that need directory listing (e.g., *.sln) */
@@ -413,6 +415,7 @@ const CODE_EXTS = new Set([
     '.cs', '.rs', '.py', '.pyw',
     '.c', '.h', '.cpp', '.cc', '.cxx', '.hpp', '.hxx',
     '.java', '.go', '.php', '.rb', '.rake',
+    '.tf', '.tfvars', '.hcl',
 ]);
 
 function estimateFileCount(dirPath: string): number {

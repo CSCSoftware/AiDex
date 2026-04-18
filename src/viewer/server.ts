@@ -18,6 +18,7 @@ import chokidar, { FSWatcher } from 'chokidar';
 import { openDatabase, createQueries } from '../db/index.js';
 import { update as updateIndex } from '../commands/update.js';
 import { getGitStatus, GitStatusInfo, GitFileStatus } from './git-status.js';
+import { isSupported as isSupportedByParser } from '../parser/index.js';
 import { PRODUCT_NAME, INDEX_DIR } from '../constants.js';
 import type Database from 'better-sqlite3';
 
@@ -154,7 +155,8 @@ export async function startViewer(projectPath: string): Promise<string> {
             '**/.git/**',
             `**/${INDEX_DIR}/**`,
             '**/build/**',
-            '**/dist/**'
+            '**/dist/**',
+            '**/.terraform/**',  // Terraform downloaded modules + state cache
         ],
         ignoreInitial: true,
         persistent: true
@@ -172,7 +174,7 @@ export async function startViewer(projectPath: string): Promise<string> {
         console.error('[Viewer] Chokidar event:', event, filePath);
 
         // Track changed files for re-indexing (only for change/add events on code files)
-        if ((event === 'change' || event === 'add') && /\.(ts|tsx|js|jsx|cs|rs|py|c|cpp|h|hpp|java|go|php|rb)$/i.test(filePath)) {
+        if ((event === 'change' || event === 'add') && isSupportedByParser(filePath)) {
             pendingChanges.add(filePath);
         }
 
@@ -617,6 +619,11 @@ function getLanguageFromExtension(filePath: string): string {
         '.php': 'php',
         '.rb': 'ruby',
         '.rake': 'ruby',
+        // HCL/Terraform: highlight.js base bundle has no hcl language module,
+        // fall back to plaintext to avoid "Unknown language" errors
+        '.tf': 'plaintext',
+        '.tfvars': 'plaintext',
+        '.hcl': 'plaintext',
         '.json': 'json',
         '.xml': 'xml',
         '.html': 'html',
