@@ -4,6 +4,13 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-04-20
+
+### Changed
+- **Node.js 18+ enforcement**: Server now exits immediately with an OS-specific install hint when run on Node <18, instead of crashing later on native modules
+- **Prerequisites section**: Added to README with install commands for macOS (brew/nvm), Linux (nvm), and Windows
+- **.nvmrc**: Added so `nvm use` picks the correct version automatically
+
 ## [1.17.0] - 2026-04-07
 
 ### Added
