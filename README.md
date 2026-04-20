@@ -184,6 +184,14 @@ The index lives in `.aidex/index.db` (SQLite) - fast, portable, no external depe
 
 ## Quick Start
 
+### Prerequisites
+
+- **Node.js ≥ 18** (check with `node --version`)
+  - macOS: `brew install node` or `nvm install 18 && nvm use 18`
+  - Linux: use your package manager or [nvm](https://github.com/nvm-sh/nvm)
+  - Windows: [nodejs.org](https://nodejs.org/)
+  - If you use `nvm`, the repo ships a `.nvmrc` — `nvm use` picks the right version automatically.
+
 ### 1. Install
 
 ```bash
