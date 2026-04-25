@@ -29,6 +29,8 @@ PLAN-*.md
 REVIEW-*.md
 RELEASE-NOTES-*.md
 AiDex_Article_English.pdf
+docs/MARKETING.md
+docs/MARKETING-PLAN.md
 
 # Scripts
 *.bat
