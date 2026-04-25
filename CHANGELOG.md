@@ -4,6 +4,9 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **tree-sitter upgrade**: Bumped `tree-sitter` from 0.21 to 0.25 and all grammar packages to latest — enables support for newer grammar packages requiring tree-sitter ^0.25.0
+
 ## [1.17.1] - 2026-04-20
 
 ### Changed

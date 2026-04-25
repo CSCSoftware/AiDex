@@ -20,6 +20,27 @@ export type SupportedLanguage =
     | 'csharp' | 'typescript' | 'javascript' | 'rust' | 'python'
     | 'c' | 'cpp' | 'java' | 'go' | 'php' | 'ruby';
 
+// Grammar packages export types incompatible with tree-sitter 0.25's Parser.Language interface.
+// All grammars work at runtime via NAPI — this is a type declaration mismatch only.
+const asLang = (grammar: unknown): Parser.Language => grammar as Parser.Language;
+
+// Maps each supported language (+ tsx/jsx virtual keys) to its tree-sitter grammar
+const GRAMMAR_MAP: Record<string, Parser.Language> = {
+    csharp: asLang(CSharp),
+    typescript: asLang(TypeScript.typescript),
+    javascript: asLang(TypeScript.typescript), // TS parser handles JS too
+    rust: asLang(Rust),
+    python: asLang(Python),
+    c: asLang(C),
+    cpp: asLang(Cpp),
+    java: asLang(Java),
+    go: asLang(Go),
+    php: asLang(Php.php),
+    ruby: asLang(Ruby),
+    tsx: asLang(TypeScript.tsx),
+    jsx: asLang(TypeScript.tsx), // tsx grammar handles JSX too
+};
+
 // File extension to language mapping
 const EXTENSION_MAP: Record<string, SupportedLanguage> = {
     '.cs': 'csharp',
@@ -59,44 +80,7 @@ export function getParser(language: SupportedLanguage): Parser {
     }
 
     parser = new Parser();
-
-    switch (language) {
-        case 'csharp':
-            parser.setLanguage(CSharp);
-            break;
-        case 'typescript':
-            parser.setLanguage(TypeScript.typescript);
-            break;
-        case 'javascript':
-            parser.setLanguage(TypeScript.typescript); // TS parser handles JS too
-            break;
-        case 'rust':
-            parser.setLanguage(Rust);
-            break;
-        case 'python':
-            parser.setLanguage(Python);
-            break;
-        case 'c':
-            parser.setLanguage(C);
-            break;
-        case 'cpp':
-            parser.setLanguage(Cpp);
-            break;
-        case 'java':
-            parser.setLanguage(Java);
-            break;
-        case 'go':
-            parser.setLanguage(Go);
-            break;
-        case 'php':
-            parser.setLanguage(Php.php);
-            break;
-        case 'ruby':
-            parser.setLanguage(Ruby);
-            break;
-        default:
-            throw new Error(`Unsupported language: ${language}`);
-    }
+    parser.setLanguage(GRAMMAR_MAP[language]);
 
     parsers.set(language, parser);
     return parser;
@@ -155,18 +139,13 @@ function getParserForGrammar(grammarKey: string): Parser {
     let parser = parsers.get(grammarKey);
     if (parser) return parser;
 
-    parser = new Parser();
-    switch (grammarKey) {
-        case 'tsx':
-            parser.setLanguage(TypeScript.tsx);
-            break;
-        case 'jsx':
-            parser.setLanguage(TypeScript.tsx); // tsx grammar handles JSX too
-            break;
-        default:
-            return getParser(grammarKey as SupportedLanguage);
+    const grammar = GRAMMAR_MAP[grammarKey];
+    if (!grammar) {
+        throw new Error(`Unsupported grammar: ${grammarKey}`);
     }
 
+    parser = new Parser();
+    parser.setLanguage(grammar);
     parsers.set(grammarKey, parser);
     return parser;
 }
