@@ -4,6 +4,13 @@ All notable changes to AiDex will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **HCL/Terraform support**: Indexes `.tf`, `.tfvars`, and `.hcl` files
+  - Blocks (`resource`, `module`, `variable`, `output`, `data`, `locals`, `provider`, ...) → types with dotted names (e.g. `resource.aws_instance.web`)
+  - Function calls → methods
+  - Attributes → properties
+  - Uses `@tree-sitter-grammars/tree-sitter-hcl` grammar
+
 ### Changed
 - **tree-sitter upgrade**: Bumped `tree-sitter` from 0.21 to 0.25 and all grammar packages to latest — enables support for newer grammar packages requiring tree-sitter ^0.25.0
 

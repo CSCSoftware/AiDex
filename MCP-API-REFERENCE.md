@@ -1167,6 +1167,7 @@ Used by `aidex_query` parameters `modified_since` and `modified_before`:
 | Go | `.go` | tree-sitter-go |
 | PHP | `.php` | tree-sitter-php |
 | Ruby | `.rb`, `.rake` | tree-sitter-ruby |
+| HCL/Terraform | `.tf`, `.tfvars`, `.hcl` | @tree-sitter-grammars/tree-sitter-hcl |
 
 ---
 
