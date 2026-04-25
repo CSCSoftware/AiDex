@@ -2,17 +2,26 @@
 
 All notable changes to AiDex will be documented in this file.
 
-## [Unreleased]
+## [1.18.0] - 2026-04-25
 
 ### Added
-- **HCL/Terraform support**: Indexes `.tf`, `.tfvars`, and `.hcl` files
+- **HCL/Terraform support** ([#9](https://github.com/CSCSoftware/AiDex/pull/9)): Indexes `.tf`, `.tfvars`, and `.hcl` files — now 12 supported languages
   - Blocks (`resource`, `module`, `variable`, `output`, `data`, `locals`, `provider`, ...) → types with dotted names (e.g. `resource.aws_instance.web`)
   - Function calls → methods
   - Attributes → properties
+  - Block labels (incl. keyword-like names: `default`, `root`, `type`, `data`) indexed as searchable items
+  - Terraform projects auto-discovered via `*.tf` and `.terraform.lock.hcl` markers in `global_init`
+  - `.terraform/` excluded from indexing
   - Uses `@tree-sitter-grammars/tree-sitter-hcl` grammar
 
 ### Changed
-- **tree-sitter upgrade**: Bumped `tree-sitter` from 0.21 to 0.25 and all grammar packages to latest — enables support for newer grammar packages requiring tree-sitter ^0.25.0
+- **tree-sitter upgrade** ([#8](https://github.com/CSCSoftware/AiDex/pull/8)): Bumped `tree-sitter` from 0.21 to 0.25 and all 10 grammar packages to latest — enables newer grammars requiring tree-sitter ^0.25.0
+- **Parser refactor**: Centralized grammar mapping in `GRAMMAR_MAP` — adding a new language is now a one-line change
+- **File watcher**: Viewer's live re-indexing watcher now uses `parser.isSupported()` instead of a hardcoded extension regex — automatically tracks every supported language
+
+### Notes
+- **Node.js 22+ recommended**: tree-sitter 0.25 requires native compilation; Node 24 not yet compatible. `.node-version` pins to 22.
+- **`tree-sitter-c-sharp` pinned to ^0.23.1**: 0.23.5+ switched to ESM-only with top-level await, breaking CJS imports.
 
 ## [1.17.1] - 2026-04-20
 
