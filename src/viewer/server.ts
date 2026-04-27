@@ -619,11 +619,11 @@ function getLanguageFromExtension(filePath: string): string {
         '.php': 'php',
         '.rb': 'ruby',
         '.rake': 'ruby',
-        // HCL/Terraform: highlight.js base bundle has no hcl language module,
-        // fall back to plaintext to avoid "Unknown language" errors
-        '.tf': 'plaintext',
-        '.tfvars': 'plaintext',
-        '.hcl': 'plaintext',
+        // HCL/Terraform: registered inline at the top of the page (see <script>
+        // hljs.registerLanguage('hcl', ...) in the HTML head)
+        '.tf': 'hcl',
+        '.tfvars': 'hcl',
+        '.hcl': 'hcl',
         '.json': 'json',
         '.xml': 'xml',
         '.html': 'html',
@@ -748,6 +748,72 @@ function getViewerHTML(projectPath: string): string {
     <title>${escapeHtml(PRODUCT_NAME)} Viewer - ${projectName}</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.0/styles/tokyo-night-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.0/highlight.min.js"></script>
+    <script>
+        // Minimal HCL/Terraform syntax highlighter for highlight.js.
+        // The CDN's base bundle has no hcl module, so we register one inline.
+        hljs.registerLanguage('hcl', function(hljs) {
+            const KEYWORDS = {
+                keyword:
+                    'resource variable module output locals data provider terraform ' +
+                    'backend provisioner connection lifecycle moved removed import check ' +
+                    'dynamic for in if else each',
+                'meta-keyword':
+                    'count for_each depends_on providers source version ' +
+                    'create_before_destroy prevent_destroy ignore_changes replace_triggered_by ' +
+                    'precondition postcondition validation type default description sensitive nullable',
+                literal: 'true false null',
+                built_in:
+                    'var local self path root ' +
+                    'abs ceil floor max min log pow signum parseint ' +
+                    'chomp format formatlist indent join lower regex regexall replace split ' +
+                    'strrev substr title trim trimprefix trimsuffix trimspace upper ' +
+                    'chunklist coalesce coalescelist compact concat contains distinct element ' +
+                    'flatten index keys length lookup matchkeys merge range reverse setintersection ' +
+                    'setproduct setsubtract setunion slice sort sum toset transpose values zipmap ' +
+                    'base64decode base64encode base64gzip csvdecode jsondecode jsonencode ' +
+                    'textdecodebase64 textencodebase64 urlencode yamldecode yamlencode ' +
+                    'abspath dirname pathexpand basename file fileexists fileset filebase64 templatefile ' +
+                    'formatdate timeadd timestamp ' +
+                    'base64sha256 base64sha512 bcrypt filebase64sha256 filebase64sha512 ' +
+                    'filemd5 filesha1 filesha256 filesha512 md5 rsadecrypt sha1 sha256 sha512 uuid uuidv5 ' +
+                    'cidrhost cidrnetmask cidrsubnet cidrsubnets ' +
+                    'can nonsensitive tobool tolist tomap tonumber tostring try ' +
+                    'string number bool list map set object tuple any optional',
+            };
+            return {
+                name: 'HCL',
+                aliases: ['terraform', 'tf', 'tfvars'],
+                case_insensitive: false,
+                keywords: KEYWORDS,
+                contains: [
+                    hljs.HASH_COMMENT_MODE,
+                    hljs.C_LINE_COMMENT_MODE,
+                    hljs.C_BLOCK_COMMENT_MODE,
+                    {
+                        className: 'string',
+                        begin: '"',
+                        end: '"',
+                        contains: [
+                            hljs.BACKSLASH_ESCAPE,
+                            { className: 'subst', begin: '\\\\$\\\\{', end: '\\\\}', keywords: KEYWORDS },
+                        ],
+                    },
+                    {
+                        // Heredoc: <<EOF ... EOF or <<-EOF ... EOF
+                        className: 'string',
+                        begin: '<<-?(\\\\w+)',
+                        end: '\\\\w+',
+                    },
+                    hljs.NUMBER_MODE,
+                    {
+                        // Function call: identifier immediately followed by (
+                        className: 'title.function',
+                        begin: '\\\\b[a-z_][a-z0-9_]*(?=\\\\()',
+                    },
+                ],
+            };
+        });
+    </script>
     <style>
         :root {
             --bg-primary: #1a1b26;
