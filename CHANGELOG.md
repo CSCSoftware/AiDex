@@ -2,6 +2,11 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Viewer: HCL/Terraform syntax highlighting**: Inline highlight.js grammar registration so `.tf`, `.tfvars`, `.hcl` files render with proper colors instead of plaintext (highlight.js has no HCL module in the base bundle)
+
 ## [1.18.0] - 2026-04-25
 
 ### Added
