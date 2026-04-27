@@ -2,6 +2,16 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Type/method name detection across 4 languages**:
+  - **C**: Function names nested inside `function_declarator` now extracted (previously missed all C function definitions)
+  - **C++**: Method names now extracted via tree-sitter's `declarator` field instead of pattern-matching node types — handles signatures with `pointer_declarator` (`int* foo()`), `reference_declarator` (`A& foo()`), `array_declarator` (`int (*foo())[10]`), qualified names (`A::foo`), conversion operators (`operator bool()`), destructor names (`~A`), operator overloads (`operator=`), and qualified return types (`std::string foo()`) — no more confusing the return type for the function name
+  - **C++**: Removed `template_function` from method nodes — it was a workaround for the name-extraction gap and produced duplicate entries for template specializations (`template<> void A::foo<int>()`); now covered by `function_definition`
+  - **Go**: Method names on receivers (`field_identifier` node) now extracted
+  - **Ruby**: Class and module names now extracted, including namespaced ones via `scope_resolution` (`class Foo::Bar`, `module A::B`)
+
 ## [1.18.0] - 2026-04-25
 
 ### Added
