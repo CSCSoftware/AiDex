@@ -260,6 +260,54 @@ function extractIdentifiersFromComment(
 }
 
 /**
+ * C/C++ declarator wrappers that may appear between `function_definition`
+ * and the actual `identifier` carrying the function/method name.
+ */
+const CPP_DECLARATOR_WRAPPERS = new Set([
+    'function_declarator',
+    'pointer_declarator',        // e.g. `int* foo()`
+    'reference_declarator',      // e.g. `A& foo()`
+    'parenthesized_declarator',  // e.g. `int (*foo)()`
+    'array_declarator',          // e.g. `int (*make_table())[10]`
+    'attributed_declarator',     // e.g. `int foo() [[nodiscard]] { ... }`
+]);
+
+/**
+ * C/C++ leaf node types that carry a function/method name.
+ */
+const CPP_FUNCTION_NAME_LEAVES = new Set([
+    'identifier',
+    'field_identifier',
+    'qualified_identifier',  // e.g. `A::foo`, also direct child for `Foo::operator bool()`
+    'destructor_name',       // e.g. `~A`
+    'operator_name',         // e.g. `operator=`
+    'operator_cast',         // e.g. `operator bool()`
+    'template_function',     // e.g. `foo<int>` (template specialization name)
+]);
+
+/**
+ * Walk the declarator chain in C/C++ (`function_definition` → maybe wrappers →
+ * `function_declarator` → identifier-ish leaf) and return the function name.
+ * Accepts the input node itself as a leaf, so it also handles cases where the
+ * `qualified_identifier` / `operator_cast` is a direct child of `function_definition`.
+ */
+function findCppFunctionName(node: Parser.SyntaxNode): string | null {
+    if (CPP_FUNCTION_NAME_LEAVES.has(node.type)) {
+        return node.text;
+    }
+    for (const child of node.children) {
+        if (CPP_FUNCTION_NAME_LEAVES.has(child.type)) {
+            return child.text;
+        }
+        if (CPP_DECLARATOR_WRAPPERS.has(child.type)) {
+            const inner = findCppFunctionName(child);
+            if (inner) return inner;
+        }
+    }
+    return null;
+}
+
+/**
  * Extract type information from a type declaration node
  */
 function extractTypeInfo(node: Parser.SyntaxNode, language: SupportedLanguage): ExtractedType | null {
@@ -286,9 +334,11 @@ function extractTypeInfo(node: Parser.SyntaxNode, language: SupportedLanguage): 
         }
     }
 
-    // Find the name child
+    // Find the name child.
+    // - 'constant' / 'scope_resolution': Ruby class/module names (incl. namespaced like `Foo::Bar`)
     const nameNode = node.children.find(c =>
         c.type === 'identifier' || c.type === 'type_identifier' || c.type === 'name'
+        || c.type === 'constant' || c.type === 'scope_resolution'
     );
 
     if (!nameNode) {
@@ -335,8 +385,20 @@ function extractMethodInfo(
         if (lower === 'async') isAsync = true;
     }
 
+    // C/C++: extract the name from the `declarator` field to avoid mistaking
+    // a qualified return type (e.g. `std::string` in `std::string foo()`) for
+    // the function name. The declarator may be a `function_declarator`, a
+    // wrapper like `pointer_declarator`/`array_declarator`, or a `qualified_identifier`
+    // for conversion operators (`Foo::operator bool() const`).
+    if (!name && node.type === 'function_definition') {
+        const declarator = node.childForFieldName('declarator');
+        if (declarator) name = findCppFunctionName(declarator);
+    }
+
     for (const child of node.children) {
-        if (child.type === 'identifier' || child.type === 'property_identifier' || child.type === 'name') {
+        // 'field_identifier': Go uses this for method names on receivers.
+        if (child.type === 'identifier' || child.type === 'property_identifier' || child.type === 'name'
+            || child.type === 'field_identifier') {
             if (!name) name = child.text;
         }
 

@@ -81,7 +81,10 @@ export const CPP_COMMENT_NODES = new Set([
  */
 export const CPP_METHOD_NODES = new Set([
     'function_definition',
-    'template_function',
+    // 'template_function' is intentionally not listed here — it always appears nested
+    // inside a `function_definition` (via `qualified_identifier`), so listing it would
+    // produce duplicate method entries for template specializations like
+    // `template<> void A::foo<int>() {}`.
 ]);
 
 /**
