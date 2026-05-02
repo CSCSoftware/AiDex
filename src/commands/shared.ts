@@ -80,16 +80,17 @@ export function withProjectDb<T>(
 
 /**
  * Parse an interval string to milliseconds.
- * Supports: "30m" (minutes), "2h" (hours), "3d" (days), "1w" (weeks)
+ * Supports: "30s" (seconds), "30m" (minutes), "2h" (hours), "3d" (days), "1w" (weeks)
  */
 export function parseIntervalToMs(interval: string): number | null {
-    const match = interval.match(/^(\d+)([mhdw])$/i);
+    const match = interval.match(/^(\d+)([smhdw])$/i);
     if (!match) return null;
 
     const value = parseInt(match[1], 10);
     const unit = match[2].toLowerCase();
 
     switch (unit) {
+        case 's': return value * 1000;
         case 'm': return value * 60 * 1000;
         case 'h': return value * 60 * 60 * 1000;
         case 'd': return value * 24 * 60 * 60 * 1000;

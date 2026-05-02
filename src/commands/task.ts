@@ -202,8 +202,9 @@ export function task(params: TaskParams): TaskResult {
         };
     }
 
+    let resultRef: TaskResult | null = null;
     try {
-        return withDatabase(dbPath, false, (db, queries) => {
+        const result = withDatabase(dbPath, false, (db, queries) => {
             try {
                 ensureTaskTables(db);
 
@@ -339,11 +340,30 @@ export function task(params: TaskParams): TaskResult {
                 };
             }
         });
+        resultRef = result;
+        return result;
     } finally {
         // Notify viewer of task changes (no-op if viewer not running)
         if (action !== 'read') {
             broadcastTaskUpdate();
         }
+        // Fire-and-forget: refresh embeddings if a task changed.
+        // No-op if embeddings aren't enabled for this project.
+        if (action !== 'read') {
+            const taskId = params.id ?? resultRef?.task?.id;
+            if (taskId != null) {
+                void notifyEmbeddingsTaskChanged(projectPath, taskId);
+            }
+        }
+    }
+}
+
+async function notifyEmbeddingsTaskChanged(projectPath: string, taskId: number): Promise<void> {
+    try {
+        const { getEmbeddings } = await import('../embeddings/index.js');
+        await getEmbeddings().onTaskChanged(projectPath, taskId);
+    } catch {
+        // Embeddings are best-effort; never break the user's task action.
     }
 }
 

@@ -57,6 +57,7 @@ const NOTE_KEY = 'session_note';
 
 export function note(params: NoteParams): NoteResult {
     const { path: projectPath, note: newNote, append, clear, history, search, limit } = params;
+    const isWriteAction = newNote !== undefined || clear === true;
 
     // Validate project path
     const dbPath = validateIndex(projectPath);
@@ -181,6 +182,18 @@ export function note(params: NoteParams): NoteResult {
         };
     } finally {
         db.close();
+        if (isWriteAction) {
+            void notifyEmbeddingsNoteChanged(projectPath);
+        }
+    }
+}
+
+async function notifyEmbeddingsNoteChanged(projectPath: string): Promise<void> {
+    try {
+        const { getEmbeddings } = await import('../embeddings/index.js');
+        await getEmbeddings().onNoteChanged(projectPath);
+    } catch {
+        // Embeddings are best-effort; never break note ops.
     }
 }
 
