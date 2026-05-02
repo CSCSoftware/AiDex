@@ -8,7 +8,9 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
+import { homedir } from 'os';
 import { join, resolve } from 'path';
+import Database from 'better-sqlite3';
 import { minimatch } from 'minimatch';
 import { createQueries } from '../db/index.js';
 import { openDatabase } from '../db/index.js';
@@ -372,20 +374,8 @@ function probeEmbeddingsStatus(projectPath: string): EmbeddingsSessionStatus {
     try {
         // Lazy synchronous probe — uses better-sqlite3 directly to stay off the
         // async embeddings module's hot path. Errors silently fall through to stub.
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const Database = require('better-sqlite3') as new (path: string, opts?: { readonly?: boolean }) => {
-            prepare(sql: string): { all(...args: unknown[]): unknown[]; get(...args: unknown[]): unknown };
-            close(): void;
-        };
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const path = require('path') as typeof import('path');
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const os = require('os') as typeof import('os');
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const fs = require('fs') as typeof import('fs');
-
-        const globalDbPath = path.join(os.homedir(), '.aidex', 'global.db');
-        if (!fs.existsSync(globalDbPath)) return stub;
+        const globalDbPath = join(homedir(), '.aidex', 'global.db');
+        if (!existsSync(globalDbPath)) return stub;
 
         const db = new Database(globalDbPath, { readonly: true });
         try {
@@ -457,16 +447,8 @@ function formatAge(days: number): string {
  */
 function computeUpdateBanner(): string | null {
     try {
-        const Database = require('better-sqlite3') as new (path: string, opts?: { readonly?: boolean }) => {
-            prepare(sql: string): { get(...args: unknown[]): unknown };
-            close(): void;
-        };
-        const path = require('path') as typeof import('path');
-        const os = require('os') as typeof import('os');
-        const fs = require('fs') as typeof import('fs');
-
-        const dbPath = path.join(os.homedir(), '.aidex', 'global.db');
-        if (!fs.existsSync(dbPath)) return null;
+        const dbPath = join(homedir(), '.aidex', 'global.db');
+        if (!existsSync(dbPath)) return null;
         const db = new Database(dbPath, { readonly: true });
         try {
             const seenRow = db

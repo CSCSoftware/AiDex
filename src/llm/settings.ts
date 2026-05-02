@@ -10,9 +10,10 @@
  * Wraps the lower-level pieces from config.ts, store.ts, and the providers.
  */
 
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import Database from 'better-sqlite3';
 
 import { PRODUCT_VERSION } from '../constants.js';
 import {
@@ -334,8 +335,7 @@ function isModelCachedOnDisk(modelId: string): boolean {
     if (!existsSync(cacheRoot)) return false;
     // Loose check: any non-empty subdir under cacheRoot means at least one model is cached.
     try {
-        const fs = require('fs') as typeof import('fs');
-        const entries = fs.readdirSync(cacheRoot, { withFileTypes: true });
+        const entries = readdirSync(cacheRoot, { withFileTypes: true });
         return entries.some(e => e.isDirectory());
     } catch {
         return false;
@@ -344,10 +344,6 @@ function isModelCachedOnDisk(modelId: string): boolean {
 
 function readSendCodeFromDb(projectPath: string): boolean {
     try {
-        const Database = require('better-sqlite3') as new (path: string, opts?: { readonly?: boolean }) => {
-            prepare(sql: string): { get(...args: unknown[]): unknown };
-            close(): void;
-        };
         const dbPath = join(homedir(), '.aidex', 'global.db');
         if (!existsSync(dbPath)) return false;
         const db = new Database(dbPath, { readonly: true });
@@ -365,10 +361,6 @@ function readSendCodeFromDb(projectPath: string): boolean {
 }
 
 function writeProjectLlmSettings(projectPath: string, payload: SetSettingsPayload): void {
-    const Database = require('better-sqlite3') as new (path: string) => {
-        prepare(sql: string): { run(...args: unknown[]): unknown };
-        close(): void;
-    };
     const dbPath = join(homedir(), '.aidex', 'global.db');
     if (!existsSync(dbPath)) return;
     const db = new Database(dbPath);
@@ -397,10 +389,6 @@ function writeProjectLlmSettings(projectPath: string, payload: SetSettingsPayloa
 }
 
 function disableEmbeddingsForProject(projectPath: string): void {
-    const Database = require('better-sqlite3') as new (path: string) => {
-        prepare(sql: string): { run(...args: unknown[]): unknown };
-        close(): void;
-    };
     const dbPath = join(homedir(), '.aidex', 'global.db');
     if (!existsSync(dbPath)) return;
     const db = new Database(dbPath);
@@ -415,10 +403,6 @@ function disableEmbeddingsForProject(projectPath: string): void {
 
 function readMetadata(key: string): string | null {
     try {
-        const Database = require('better-sqlite3') as new (path: string, opts?: { readonly?: boolean }) => {
-            prepare(sql: string): { get(...args: unknown[]): unknown };
-            close(): void;
-        };
         const dbPath = join(homedir(), '.aidex', 'global.db');
         if (!existsSync(dbPath)) return null;
         const db = new Database(dbPath, { readonly: true });
@@ -437,10 +421,6 @@ function readMetadata(key: string): string | null {
 
 function writeMetadata(key: string, value: string): void {
     try {
-        const Database = require('better-sqlite3') as new (path: string) => {
-            prepare(sql: string): { run(...args: unknown[]): unknown };
-            close(): void;
-        };
         const dbPath = join(homedir(), '.aidex', 'global.db');
         if (!existsSync(dbPath)) return;
         const db = new Database(dbPath);
