@@ -38,6 +38,16 @@ import { _searchDbAccessor, ensureVecTable } from './store.js';
 
 const RRF_K = 60;
 const SEMANTIC_FETCH_FACTOR = 3; // pull 3x more candidates than k for filtering headroom
+// Floor for the vec0 KNN candidate pool. Without this, small `k` (e.g. k=5)
+// asks vec0 for only 15 neighbours, while k=10 asks for 30. sqlite-vec's KNN
+// is not strictly stable under k variation (ANN-style behaviour: the top-N
+// of a k=30 query is not always equal to the result of a k=15 query),
+// which made `aidex_search k=5` occasionally return 0 hits while k=10
+// returned 3 — even though k=5 should be a subset of k=10. Pinning the
+// candidate pool to at least SEMANTIC_FETCH_FLOOR makes the underlying
+// KNN deterministic across user-facing `k` values; the JS slice does the
+// final trimming.
+const SEMANTIC_FETCH_FLOOR = 60;
 
 let _embedderCache: { modelId: string; embedder: Embedder } | null = null;
 
@@ -77,7 +87,7 @@ export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
     // Retrieval — run against each subquery and merge by RRF.
     // For a single-query path this is a single pass with no merge cost.
     // ============================================================
-    const candidateLimit = k * SEMANTIC_FETCH_FACTOR;
+    const candidateLimit = Math.max(k * SEMANTIC_FETCH_FACTOR, SEMANTIC_FETCH_FLOOR);
     const semBatches: SearchHit[][] = [];
     if (mode !== 'exact') {
         for (const q of queries) {
