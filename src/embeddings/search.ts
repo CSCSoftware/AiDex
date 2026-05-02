@@ -25,6 +25,7 @@ import { createEmbedder, type Embedder } from './embedder.js';
 import { getModel } from './model-registry.js';
 import { getLlm } from '../llm/index.js';
 import { readLlmSendCode } from '../llm/config.js';
+import { normalizePath } from '../commands/shared.js';
 
 // ============================================================
 // Singleton DB connection (must be the same connection that has sqlite-vec loaded)
@@ -62,12 +63,13 @@ async function getQueryEmbedder(modelId: string): Promise<Embedder> {
 export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
     const k = opts.k ?? 20;
     const mode = opts.mode ?? 'hybrid';
-    const scope = opts.scope ?? (opts.path ? 'current' : 'all');
+    const path = opts.path ? normalizePath(opts.path) : undefined;
+    const scope = opts.scope ?? (path ? 'current' : 'all');
     const llmStrategy: LlmStrategy = opts.llm ?? 'auto';
 
     const db = _searchDbAccessor();
 
-    const projects = resolveProjects(db, scope, opts.path, opts.projectFilter);
+    const projects = resolveProjects(db, scope, path, opts.projectFilter);
     if (projects.length === 0) return [];
 
     const modelId = projects[0].embedding_model_id;
@@ -81,7 +83,7 @@ export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
     // ============================================================
     // LLM stage 1: query rewriting (translate / expand)
     // ============================================================
-    const queries = await rewriteQuery(opts.query, llmStrategy, opts.path);
+    const queries = await rewriteQuery(opts.query, llmStrategy, path);
 
     // ============================================================
     // Retrieval — run against each subquery and merge by RRF.
@@ -99,7 +101,7 @@ export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
 
     if (mode === 'semantic') {
         // No exact-match fusion. Optionally rerank.
-        return await maybeRerank(semantic.slice(0, k), opts, llmStrategy, opts.path);
+        return await maybeRerank(semantic.slice(0, k), opts, llmStrategy, path);
     }
 
     // Exact side runs against the original query (exact match in any
@@ -107,12 +109,12 @@ export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
     const exact = runExactAcrossProjects(projects, opts, candidateLimit);
 
     if (mode === 'exact') {
-        return await maybeRerank(exact.slice(0, k), opts, llmStrategy, opts.path);
+        return await maybeRerank(exact.slice(0, k), opts, llmStrategy, path);
     }
 
     // Hybrid: RRF fusion of semantic + exact.
     const fused = fuseRRF(semantic, exact, k);
-    return await maybeRerank(fused, opts, llmStrategy, opts.path);
+    return await maybeRerank(fused, opts, llmStrategy, path);
 }
 
 // ============================================================
