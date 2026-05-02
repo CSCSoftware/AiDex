@@ -20,7 +20,7 @@ import { update as updateIndex } from '../commands/update.js';
 import { getGitStatus, GitStatusInfo, GitFileStatus } from './git-status.js';
 import { isSupported as isSupportedByParser } from '../parser/index.js';
 import { PRODUCT_NAME, INDEX_DIR } from '../constants.js';
-import type Database from 'better-sqlite3';
+import Database from 'better-sqlite3';
 
 const PORT = 3333;
 
@@ -31,12 +31,37 @@ let viewerDbPath: string | null = null;
 let viewerDb: ReturnType<typeof openDatabase> | null = null;
 
 interface ViewerMessage {
-    type: 'getTree' | 'getSignature' | 'getFileContent' | 'getTasks' | 'updateTaskStatus';
-    mode?: 'code' | 'all';  // Tree mode
+    type:
+        | 'getTree'
+        | 'getSignature'
+        | 'getFileContent'
+        | 'getTasks'
+        | 'updateTaskStatus'
+        | 'searchEmbeddings'
+        | 'getSettings'
+        | 'setSettings'
+        | 'testLlmConnection'
+        | 'pollPendingFocus';
+    mode?: 'code' | 'all' | 'semantic' | 'hybrid' | 'exact';
     path?: string;
     file?: string;
     taskId?: number;
     status?: string;
+    // searchEmbeddings fields
+    query?: string;
+    requestId?: number;
+    scope?: 'current' | 'all' | 'linked';
+    sourceKinds?: Array<'code' | 'docs' | 'workspace'>;
+    k?: number;
+    // setSettings payload
+    payload?: {
+        enableEmbeddings?: boolean;
+        embeddingModel?: string;
+        llmEndpoint?: string | null;
+        llmModel?: string | null;
+        llmApiKey?: string | null;
+        llmSendCode?: boolean;
+    };
 }
 
 interface TreeNode {
@@ -59,10 +84,16 @@ interface SessionChangeInfo {
     new: Set<string>;
 }
 
-export async function startViewer(projectPath: string): Promise<string> {
-    // Check if already running
+export async function startViewer(projectPath: string, initialTab?: string): Promise<string> {
+    const hash = initialTab ? `#tab=${encodeURIComponent(initialTab)}` : '';
+
+    // Check if already running — broadcast a focus message + reopen browser at the hash URL.
     if (server) {
-        return `Viewer already running at http://localhost:${PORT}`;
+        if (initialTab) {
+            broadcastFocusTab(initialTab);
+            try { openBrowser(`http://localhost:${PORT}${hash}`); } catch { /* ignore */ }
+        }
+        return `Viewer already running at http://localhost:${PORT}${hash}`;
     }
 
     const dbPath = path.join(projectPath, INDEX_DIR, 'index.db');
@@ -206,6 +237,18 @@ export async function startViewer(projectPath: string): Promise<string> {
     wss.on('connection', (ws: WebSocket) => {
         console.error('[Viewer] Client connected');
 
+        // If a focus-tab request is pending in global.db (e.g. user just ran
+        // aidex_settings from a different MCP module instance), replay it now.
+        const pending = readPendingFocusTab();
+        if (pending) {
+            writePendingFocusTab(null);
+            setTimeout(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'focusTab', tab: pending }));
+                }
+            }, 50);
+        }
+
         ws.on('message', async (data: Buffer) => {
             try {
                 const msg: ViewerMessage = JSON.parse(data.toString());
@@ -244,6 +287,82 @@ export async function startViewer(projectPath: string): Promise<string> {
                         });
                     }
                 }
+                else if (msg.type === 'getSettings') {
+                    try {
+                        const { getSettings } = await import('../llm/settings.js');
+                        const s = await getSettings(projectPath);
+                        ws.send(JSON.stringify({ type: 'settings', requestId: msg.requestId, data: s }));
+                    } catch (err) {
+                        ws.send(JSON.stringify({
+                            type: 'settings',
+                            requestId: msg.requestId,
+                            error: err instanceof Error ? err.message : String(err),
+                        }));
+                    }
+                }
+                else if (msg.type === 'pollPendingFocus') {
+                    // Client polls this once after connecting / on visibilitychange.
+                    // Returns and clears any pending focus-tab request stored in global.db.
+                    const tab = readPendingFocusTab();
+                    if (tab) {
+                        writePendingFocusTab(null);
+                        ws.send(JSON.stringify({ type: 'focusTab', tab }));
+                    }
+                }
+                else if (msg.type === 'setSettings' && msg.payload) {
+                    try {
+                        const { setSettings, getSettings } = await import('../llm/settings.js');
+                        const result = await setSettings(projectPath, msg.payload);
+                        const updated = await getSettings(projectPath);
+                        ws.send(JSON.stringify({
+                            type: 'settingsSaved',
+                            requestId: msg.requestId,
+                            result,
+                            data: updated,
+                        }));
+                    } catch (err) {
+                        ws.send(JSON.stringify({
+                            type: 'settingsSaved',
+                            requestId: msg.requestId,
+                            result: { success: false, error: err instanceof Error ? err.message : String(err) },
+                        }));
+                    }
+                }
+                else if (msg.type === 'testLlmConnection') {
+                    try {
+                        const { testLlmConnection } = await import('../llm/settings.js');
+                        const r = await testLlmConnection(projectPath);
+                        ws.send(JSON.stringify({ type: 'llmTestResult', requestId: msg.requestId, data: r }));
+                    } catch (err) {
+                        ws.send(JSON.stringify({
+                            type: 'llmTestResult',
+                            requestId: msg.requestId,
+                            data: { ok: false, error: err instanceof Error ? err.message : String(err) },
+                        }));
+                    }
+                }
+                else if (msg.type === 'searchEmbeddings' && typeof msg.query === 'string') {
+                    const requestId = msg.requestId;
+                    try {
+                        const { getEmbeddings } = await import('../embeddings/index.js');
+                        const hits = await getEmbeddings().search({
+                            query: msg.query,
+                            path: projectPath,
+                            scope: (msg.scope as 'current' | 'all' | 'linked' | undefined) ?? 'current',
+                            sourceKinds: msg.sourceKinds as Array<'code' | 'docs' | 'workspace'> | undefined,
+                            mode: (msg.mode as 'semantic' | 'hybrid' | 'exact' | undefined) ?? 'hybrid',
+                            k: typeof msg.k === 'number' ? msg.k : 20,
+                        });
+                        ws.send(JSON.stringify({ type: 'searchResults', requestId, hits }));
+                    } catch (err) {
+                        ws.send(JSON.stringify({
+                            type: 'searchResults',
+                            requestId,
+                            hits: [],
+                            error: err instanceof Error ? err.message : String(err),
+                        }));
+                    }
+                }
                 else {
                     ws.send(JSON.stringify({ type: 'error', message: `Unknown message type: ${msg.type}` }));
                 }
@@ -267,10 +386,9 @@ export async function startViewer(projectPath: string): Promise<string> {
 
     return new Promise((resolve, reject) => {
         server!.listen(PORT, () => {
-            const url = `http://localhost:${PORT}`;
+            const url = `http://localhost:${PORT}${hash}`;
             console.error(`[Viewer] Server running at ${url}`);
 
-            // Open browser
             openBrowser(url);
 
             resolve(`Viewer opened at ${url}`);
@@ -290,6 +408,81 @@ export async function startViewer(projectPath: string): Promise<string> {
  * Broadcast task updates to all connected viewer clients.
  * Called from task.ts after create/update/delete operations.
  */
+/**
+ * Persisted pending tab to focus. Stored in global.db so it survives across
+ * MCP server module instances (the viewer module is sometimes loaded twice
+ * via dynamic import, once for `startViewer` and once for `broadcastFocusTab`).
+ *
+ * The browser polls for it via the `pollPendingFocus` WebSocket message right
+ * after connecting, and clears it server-side after delivery.
+ */
+const PENDING_FOCUS_KEY = 'pending_viewer_focus_tab';
+
+function getGlobalDbPath(): string | null {
+    const homedir = process.env.USERPROFILE ?? process.env.HOME;
+    if (!homedir) return null;
+    const dbPath = path.join(homedir, '.aidex', 'global.db');
+    return existsSync(dbPath) ? dbPath : null;
+}
+
+function readPendingFocusTab(): string | null {
+    try {
+        const dbPath = getGlobalDbPath();
+        if (!dbPath) return null;
+        const db = new Database(dbPath, { readonly: true });
+        try {
+            const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get(PENDING_FOCUS_KEY) as
+                | { value: string }
+                | undefined;
+            return row?.value ?? null;
+        } finally {
+            db.close();
+        }
+    } catch (err) {
+        console.error('[Viewer] readPendingFocusTab failed:', err);
+        return null;
+    }
+}
+
+function writePendingFocusTab(tab: string | null): void {
+    try {
+        const dbPath = getGlobalDbPath();
+        if (!dbPath) return;
+        const db = new Database(dbPath);
+        try {
+            if (tab) {
+                db.prepare('INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)').run(PENDING_FOCUS_KEY, tab);
+            } else {
+                db.prepare('DELETE FROM metadata WHERE key = ?').run(PENDING_FOCUS_KEY);
+            }
+        } finally {
+            db.close();
+        }
+    } catch (err) {
+        console.error('[Viewer] writePendingFocusTab failed:', err);
+    }
+}
+
+/**
+ * Request that the viewer focus a tab. Works whether the viewer is in the
+ * same Node process or in a different one — state lives in global.db.
+ * Browsers pick it up via the `pollPendingFocus` WS message on connect.
+ */
+export function broadcastFocusTab(tab: string): void {
+    // Persist first so any module instance can serve it.
+    writePendingFocusTab(tab);
+
+    // Also try a live broadcast for the case where the browser is already
+    // connected to *this* module instance.
+    if (wss) {
+        wss.clients.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'focusTab', tab }));
+            }
+        });
+    }
+}
+
 export function broadcastTaskUpdate(): void {
     if (!wss || !viewerDbPath) return;
 
@@ -1243,6 +1436,356 @@ function getViewerHTML(projectPath: string): string {
             padding: 40px;
         }
         .log-not-init code { color: var(--accent-cyan); }
+
+        /* Search tab */
+        .search-controls {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: var(--bg-secondary);
+        }
+        .search-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .search-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 8px 12px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font: inherit;
+            font-size: 14px;
+        }
+        .search-input:focus { outline: none; border-color: var(--accent-cyan); }
+        .search-segment {
+            display: inline-flex;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            font-size: 0.85em;
+        }
+        .search-segment label {
+            padding: 6px 10px;
+            cursor: pointer;
+            background: var(--bg-primary);
+            color: var(--text-muted);
+            border-right: 1px solid var(--border);
+            user-select: none;
+        }
+        .search-segment label:last-child { border-right: none; }
+        .search-segment input { display: none; }
+        .search-segment input:checked + label {
+            background: var(--accent-cyan);
+            color: var(--bg-primary);
+        }
+        .search-kinds { display: flex; gap: 12px; font-size: 0.85em; color: var(--text-secondary); }
+        .search-kinds label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+        .search-kinds input[type="checkbox"] { accent-color: var(--accent-cyan); }
+        .search-k-row { display: flex; align-items: center; gap: 8px; font-size: 0.85em; color: var(--text-muted); }
+        .search-k-row input[type="range"] { flex: 1; accent-color: var(--accent-cyan); }
+        .search-results { padding: 0; }
+        .search-hint {
+            padding: 24px 16px;
+            color: var(--text-muted);
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+        .search-result {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .search-result:hover { background: var(--bg-tertiary); }
+        .search-result-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        .search-result-rank {
+            color: var(--text-muted);
+            font-size: 0.85em;
+            min-width: 20px;
+        }
+        .search-badge {
+            font-size: 0.7em;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+        .search-badge.code     { color: var(--accent-cyan);   border-color: var(--accent-cyan); }
+        .search-badge.docs     { color: var(--accent-yellow); border-color: var(--accent-yellow); }
+        .search-badge.workspace{ color: var(--accent-purple); border-color: var(--accent-purple); }
+        .search-result-name { flex: 1; word-break: break-word; }
+        .search-result-dist {
+            color: var(--text-muted);
+            font-size: 0.8em;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+        .search-result-loc {
+            color: var(--text-secondary);
+            font-size: 0.85em;
+            font-family: 'Consolas', 'Monaco', monospace;
+            margin-bottom: 4px;
+        }
+        .search-result-snippet {
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            white-space: pre-wrap;
+            font-family: 'Consolas', 'Monaco', monospace;
+            max-height: 4.2em;
+            overflow: hidden;
+        }
+        .search-error {
+            padding: 16px;
+            color: var(--accent-red);
+            font-size: 0.9em;
+            border-left: 3px solid var(--accent-red);
+            background: var(--bg-secondary);
+            margin: 12px 16px;
+        }
+
+        /* Markdown rendering inside task descriptions */
+        .markdown-body { line-height: 1.5; }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3,
+        .markdown-body h4, .markdown-body h5, .markdown-body h6 {
+            margin: 0.7em 0 0.3em;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .markdown-body h1 { font-size: 1.2em; }
+        .markdown-body h2 { font-size: 1.1em; color: var(--accent-cyan); }
+        .markdown-body h3 { font-size: 1.0em; color: var(--accent-purple); }
+        .markdown-body h4 { font-size: 0.95em; color: var(--accent-yellow); }
+        .markdown-body p { margin: 0.4em 0; }
+        .markdown-body ul, .markdown-body ol { margin: 0.3em 0 0.3em 1.4em; padding: 0; }
+        .markdown-body li { margin: 0.15em 0; }
+        .markdown-body code {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 1px 5px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+            color: var(--accent-yellow);
+        }
+        .markdown-body pre {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 8px 10px;
+            margin: 0.5em 0;
+            overflow-x: auto;
+        }
+        .markdown-body pre code {
+            background: transparent;
+            border: none;
+            padding: 0;
+            color: var(--text-primary);
+            font-size: 0.85em;
+            white-space: pre;
+        }
+        .markdown-body blockquote {
+            border-left: 3px solid var(--accent-cyan);
+            padding-left: 10px;
+            margin: 0.5em 0;
+            color: var(--text-secondary);
+        }
+        .markdown-body table {
+            border-collapse: collapse;
+            margin: 0.5em 0;
+            font-size: 0.88em;
+            width: 100%;
+        }
+        .markdown-body th, .markdown-body td {
+            border: 1px solid var(--border);
+            padding: 4px 8px;
+            text-align: left;
+        }
+        .markdown-body th {
+            background: var(--bg-primary);
+            color: var(--accent-cyan);
+            font-weight: 600;
+        }
+        .markdown-body hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 0.8em 0;
+        }
+        .markdown-body strong { color: var(--text-primary); font-weight: 600; }
+        .markdown-body em { color: var(--text-primary); }
+        .markdown-body a { color: var(--accent-cyan); text-decoration: none; }
+        .markdown-body a:hover { text-decoration: underline; }
+        .markdown-body del { color: var(--text-muted); text-decoration: line-through; }
+
+        /* Settings tab */
+        .settings-page {
+            padding: 20px 24px 80px;
+            max-width: 720px;
+        }
+        .settings-page h2 {
+            font-size: 1.3em;
+            margin: 0 0 4px;
+            color: var(--text-primary);
+        }
+        .settings-page .subtitle {
+            color: var(--text-muted);
+            font-size: 0.9em;
+            margin-bottom: 24px;
+        }
+        .settings-section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px 18px;
+            margin-bottom: 20px;
+        }
+        .settings-section-title {
+            font-size: 1em;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            margin: 0 0 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .settings-section-help {
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin: 0 0 14px;
+            line-height: 1.5;
+        }
+        .settings-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            margin: 10px 0;
+        }
+        .settings-row label {
+            color: var(--text-secondary);
+            font-size: 0.9em;
+            min-width: 100px;
+        }
+        .settings-row input[type="text"],
+        .settings-row input[type="password"],
+        .settings-row select {
+            flex: 1;
+            min-width: 220px;
+            padding: 6px 10px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font: inherit;
+            font-size: 0.9em;
+        }
+        .settings-row input:focus, .settings-row select:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+        }
+        .settings-toggle {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin: 12px 0;
+            cursor: pointer;
+        }
+        .settings-toggle input[type="checkbox"] {
+            margin-top: 4px;
+            accent-color: var(--accent-cyan);
+            transform: scale(1.2);
+        }
+        .settings-toggle .label-main {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        .settings-toggle .label-help {
+            display: block;
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin-top: 2px;
+            line-height: 1.4;
+        }
+        .settings-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.82em;
+            font-weight: 500;
+        }
+        .settings-status.ok      { background: rgba(158, 206, 106, 0.18); color: var(--accent-green); }
+        .settings-status.off     { background: rgba(86, 95, 137, 0.25);   color: var(--text-muted); }
+        .settings-status.warn    { background: rgba(224, 175, 104, 0.18); color: var(--accent-yellow); }
+        .settings-status.err     { background: rgba(247, 118, 142, 0.15); color: var(--accent-red); }
+        .settings-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 18px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border);
+        }
+        .settings-btn {
+            padding: 8px 18px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font: inherit;
+            font-size: 0.9em;
+            cursor: pointer;
+        }
+        .settings-btn:hover { border-color: var(--accent-cyan); }
+        .settings-btn.primary {
+            background: var(--accent-cyan);
+            color: var(--bg-primary);
+            border-color: var(--accent-cyan);
+            font-weight: 600;
+        }
+        .settings-btn.primary:hover { background: #91d8ff; }
+        .settings-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .settings-info {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 8px 12px;
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            margin: 10px 0;
+            line-height: 1.4;
+        }
+        .settings-info code { color: var(--accent-yellow); }
+        .settings-feedback {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border-radius: 4px;
+            font-size: 0.88em;
+        }
+        .settings-feedback.success { background: rgba(158, 206, 106, 0.15); color: var(--accent-green); border: 1px solid var(--accent-green); }
+        .settings-feedback.error { background: rgba(247, 118, 142, 0.10); color: var(--accent-red); border: 1px solid var(--accent-red); }
+        .settings-update-banner {
+            background: linear-gradient(90deg, rgba(125, 207, 255, 0.15), rgba(187, 154, 247, 0.10));
+            border: 1px solid var(--accent-cyan);
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+        .settings-update-banner strong { color: var(--accent-cyan); }
     </style>
 </head>
 <body>
@@ -1268,6 +1811,8 @@ function getViewerHTML(projectPath: string): string {
                 <div class="tab" data-tab="source">Code</div>
                 <div class="tab" data-tab="tasks">Tasks</div>
                 <div class="tab" data-tab="logs">Logs</div>
+                <div class="tab" data-tab="search">Search</div>
+                <div class="tab" data-tab="settings">Settings</div>
             </div>
             <div class="panel-content" id="detail">
                 <div class="empty-state">
@@ -1287,9 +1832,37 @@ function getViewerHTML(projectPath: string): string {
         let cachedContent = null;
         let cachedTasks = null;
 
+        function pollPendingFocus() {
+            try { ws.send(JSON.stringify({ type: 'pollPendingFocus' })); } catch (e) { /* ignore */ }
+        }
+
         ws.onopen = () => {
             console.log('Connected to AiDex Viewer');
+            // Ask the server: any pending focus-tab request?
+            pollPendingFocus();
+            // Honor URL hash like #tab=settings as a fallback path.
+            const hash = window.location.hash;
+            const m = hash.match(/tab=([\w-]+)/);
+            if (m) {
+                const target = decodeURIComponent(m[1]);
+                const tabEl = document.querySelector('.detail-panel .tab[data-tab="' + target + '"]');
+                if (tabEl) tabEl.click();
+            }
         };
+
+        // Poll for pending focus when the tab regains visibility — covers
+        // the case where the user already had the viewer open in another tab
+        // and triggered aidex_settings({open:true}) elsewhere.
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && ws.readyState === WebSocket.OPEN) pollPendingFocus();
+        });
+        window.addEventListener('focus', () => {
+            if (ws.readyState === WebSocket.OPEN) pollPendingFocus();
+        });
+        // Also poll periodically while visible — cheap, covers everything.
+        setInterval(() => {
+            if (!document.hidden && ws.readyState === WebSocket.OPEN) pollPendingFocus();
+        }, 2000);
 
         ws.onclose = () => {
             console.log('WebSocket closed — reconnecting in 2s...');
@@ -1338,6 +1911,17 @@ function getViewerHTML(projectPath: string): string {
                 }
             } else if (msg.type === 'log') {
                 handleLogEntry(msg.entry);
+            } else if (msg.type === 'searchResults') {
+                handleSearchResults(msg);
+            } else if (msg.type === 'settings') {
+                handleSettings(msg);
+            } else if (msg.type === 'settingsSaved') {
+                handleSettingsSaved(msg);
+            } else if (msg.type === 'llmTestResult') {
+                handleLlmTestResult(msg);
+            } else if (msg.type === 'focusTab' && msg.tab) {
+                const tab = document.querySelector('.detail-panel .tab[data-tab="' + msg.tab + '"]');
+                if (tab) tab.click();
             }
         };
 
@@ -1385,6 +1969,10 @@ function getViewerHTML(projectPath: string): string {
                     }
                 } else if (currentDetailTab === 'logs') {
                     renderLogView();
+                } else if (currentDetailTab === 'search') {
+                    renderSearchTab();
+                } else if (currentDetailTab === 'settings') {
+                    renderSettingsTab();
                 }
             });
         });
@@ -1706,7 +2294,7 @@ function getViewerHTML(projectPath: string): string {
                 html += '<div style="font-size:0.88em;color:var(--text-secondary);margin-top:2px;font-style:italic">' + escapeHtml(t.summary) + '</div>';
             }
             if (t.description) {
-                html += '<div class="task-description">' + escapeHtml(t.description) + '</div>';
+                html += '<div class="task-description markdown-body">' + renderMarkdown(t.description) + '</div>';
             }
             const meta = [];
             meta.push(priorityLabel[t.priority] || 'Medium');
@@ -1771,6 +2359,733 @@ function getViewerHTML(projectPath: string): string {
             if (currentDetailTab === 'logs' && logViewInitialized) {
                 appendLogEntryToDOM(entry);
             }
+        }
+
+        // ============================================================
+        // Search tab — semantic search across embeddings
+        // ============================================================
+        let searchState = {
+            query: '',
+            mode: 'hybrid',
+            kinds: { code: true, docs: true, workspace: true },
+            k: 20,
+            inFlight: 0,
+            results: null,
+            error: null,
+        };
+        let searchRequestSeq = 0;
+        let searchDebounce = null;
+
+        function renderSearchTab() {
+            const detail = document.getElementById('detail');
+            // The detail panel is shared across tabs and gets overwritten when other
+            // tabs render. So we always re-build our controls if they're missing.
+            const needsBuild = !document.getElementById('searchInput');
+            if (needsBuild) {
+                detail.innerHTML = \`
+                    <div class="search-controls">
+                        <div class="search-row">
+                            <input type="text" class="search-input" id="searchInput"
+                                placeholder="Ask a question — e.g. 'how do we cache the embedding model'"
+                                autocomplete="off" />
+                        </div>
+                        <div class="search-row">
+                            <div class="search-segment" id="searchModeSeg">
+                                <input type="radio" name="searchMode" id="mode-hybrid" value="hybrid" checked>
+                                <label for="mode-hybrid">Hybrid</label>
+                                <input type="radio" name="searchMode" id="mode-semantic" value="semantic">
+                                <label for="mode-semantic">Semantic</label>
+                                <input type="radio" name="searchMode" id="mode-exact" value="exact">
+                                <label for="mode-exact">Exact</label>
+                            </div>
+                            <div class="search-kinds">
+                                <label><input type="checkbox" id="kind-code" checked> Code</label>
+                                <label><input type="checkbox" id="kind-docs" checked> Docs</label>
+                                <label><input type="checkbox" id="kind-workspace" checked> Workspace</label>
+                            </div>
+                        </div>
+                        <div class="search-k-row">
+                            <span>k =</span>
+                            <input type="range" id="searchK" min="5" max="50" step="5" value="20">
+                            <span id="searchKLabel">20</span>
+                        </div>
+                    </div>
+                    <div class="search-results" id="searchResults">
+                        <div class="search-hint">
+                            Type a natural-language question. Results stream in as you type.<br>
+                            Click any hit to open the file or task it points to.
+                        </div>
+                    </div>
+                \`;
+                wireSearchControls();
+            }
+
+            // Restore state from prior visit
+            const input = document.getElementById('searchInput');
+            if (input) input.value = searchState.query;
+            const kSlider = document.getElementById('searchK');
+            if (kSlider) kSlider.value = searchState.k;
+            const kLabel = document.getElementById('searchKLabel');
+            if (kLabel) kLabel.textContent = searchState.k;
+            ['hybrid','semantic','exact'].forEach(m => {
+                const el = document.getElementById('mode-' + m);
+                if (el) el.checked = (m === searchState.mode);
+            });
+            ['code','docs','workspace'].forEach(k => {
+                const el = document.getElementById('kind-' + k);
+                if (el) el.checked = !!searchState.kinds[k];
+            });
+            renderSearchResults();
+            if (input) setTimeout(() => input.focus(), 50);
+        }
+
+        function wireSearchControls() {
+            const input = document.getElementById('searchInput');
+            input.addEventListener('input', () => {
+                searchState.query = input.value;
+                scheduleSearch();
+            });
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); runSearchNow(); }
+            });
+            document.querySelectorAll('input[name="searchMode"]').forEach(r => {
+                r.addEventListener('change', () => {
+                    searchState.mode = document.querySelector('input[name="searchMode"]:checked').value;
+                    if (searchState.query.trim()) runSearchNow();
+                });
+            });
+            ['code','docs','workspace'].forEach(k => {
+                const el = document.getElementById('kind-' + k);
+                el.addEventListener('change', () => {
+                    searchState.kinds[k] = el.checked;
+                    if (searchState.query.trim()) runSearchNow();
+                });
+            });
+            const slider = document.getElementById('searchK');
+            slider.addEventListener('input', () => {
+                searchState.k = parseInt(slider.value, 10);
+                document.getElementById('searchKLabel').textContent = searchState.k;
+            });
+            slider.addEventListener('change', () => {
+                if (searchState.query.trim()) runSearchNow();
+            });
+        }
+
+        function scheduleSearch() {
+            if (searchDebounce) clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(runSearchNow, 350);
+        }
+
+        function runSearchNow() {
+            const q = searchState.query.trim();
+            if (!q) {
+                searchState.results = null;
+                searchState.error = null;
+                renderSearchResults();
+                return;
+            }
+            const kinds = Object.keys(searchState.kinds).filter(k => searchState.kinds[k]);
+            if (kinds.length === 0) {
+                searchState.error = 'Select at least one source kind (Code / Docs / Workspace).';
+                searchState.results = null;
+                renderSearchResults();
+                return;
+            }
+            searchRequestSeq++;
+            searchState.inFlight = searchRequestSeq;
+            searchState.error = null;
+            renderSearchResults();
+            ws.send(JSON.stringify({
+                type: 'searchEmbeddings',
+                query: q,
+                mode: searchState.mode,
+                sourceKinds: kinds,
+                k: searchState.k,
+                requestId: searchRequestSeq,
+            }));
+        }
+
+        function handleSearchResults(msg) {
+            if (msg.requestId !== searchState.inFlight) return; // stale
+            searchState.inFlight = 0;
+            if (msg.error) {
+                searchState.error = msg.error;
+                searchState.results = null;
+            } else {
+                searchState.error = null;
+                searchState.results = Array.isArray(msg.hits) ? msg.hits : [];
+            }
+            if (currentDetailTab === 'search') renderSearchResults();
+        }
+
+        function renderSearchResults() {
+            const container = document.getElementById('searchResults');
+            if (!container) return;
+            if (searchState.error) {
+                container.innerHTML = \`<div class="search-error">\${escapeHtml(searchState.error)}</div>\`;
+                return;
+            }
+            if (searchState.inFlight) {
+                container.innerHTML = '<div class="search-hint">Searching…</div>';
+                return;
+            }
+            if (!searchState.results) {
+                container.innerHTML = \`
+                    <div class="search-hint">
+                        Type a natural-language question. Results appear as you type.<br>
+                        Click any hit to open the file or task it points to.
+                    </div>\`;
+                return;
+            }
+            if (searchState.results.length === 0) {
+                container.innerHTML = '<div class="search-hint">No matches.</div>';
+                return;
+            }
+            container.innerHTML = searchState.results.map(renderHit).join('');
+            container.querySelectorAll('.search-result').forEach(el => {
+                el.addEventListener('click', (ev) => {
+                    try {
+                        const path = el.dataset.path;
+                        const kind = el.dataset.kind;
+                        if (kind === 'workspace') {
+                            const tasksTab = document.querySelector('.detail-panel .tab[data-tab="tasks"]');
+                            if (tasksTab) tasksTab.click();
+                            return;
+                        }
+                        if (path) {
+                            // Find the file node in the tree and select it (mirrors a tree click).
+                            const treeNode = document.querySelector('.tree-node[data-path="' + cssEsc(path) + '"]');
+                            if (treeNode) {
+                                treeNode.click();
+                            } else {
+                                // Fallback: just open Code/source view for the file path.
+                                currentFile = path;
+                                cachedSignature = null;
+                                cachedContent = null;
+                                ws.send(JSON.stringify({ type: 'getFileContent', file: path }));
+                                const sourceTab = document.querySelector('.detail-panel .tab[data-tab="source"]');
+                                if (sourceTab) sourceTab.click();
+                            }
+                        }
+                    } catch (err) {
+                        console.error('search-result click failed:', err);
+                    }
+                });
+            });
+        }
+
+        function renderHit(h) {
+            const kind = h.sourceKind || 'code';
+            const type = h.sourceType || '';
+            const name = h.sourceName || h.sourceAnchor || '(unnamed)';
+            const dist = (typeof h.distance === 'number' && h.distance > 0)
+                ? \`d=\${h.distance.toFixed(3)}\` : '';
+            const loc = h.sourcePath
+                ? \`\${h.sourcePath}\${h.sourceLine ? ':' + h.sourceLine : ''}\`
+                : '(workspace)';
+            const snippet = h.sourceText ? escapeHtml(h.sourceText) : '';
+            return \`
+                <div class="search-result"
+                     data-path="\${h.sourcePath ? escapeAttr(h.sourcePath) : ''}"
+                     data-kind="\${kind}"
+                     data-type="\${type}">
+                    <div class="search-result-head">
+                        <span class="search-result-rank">#\${h.rank}</span>
+                        <span class="search-badge \${kind}">\${kind}/\${type}</span>
+                        <span class="search-result-name">\${escapeHtml(name)}</span>
+                        <span class="search-result-dist">\${dist}</span>
+                    </div>
+                    <div class="search-result-loc">\${escapeHtml(loc)}</div>
+                    \${snippet ? \`<div class="search-result-snippet">\${snippet}</div>\` : ''}
+                </div>
+            \`;
+        }
+
+        function escapeAttr(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // CSS.escape polyfill for selector-safe paths (Windows backslashes etc.)
+        function cssEsc(s) {
+            if (window.CSS && CSS.escape) return CSS.escape(s);
+            return String(s).replace(/[^a-zA-Z0-9_\-]/g, ch => '\\\\' + ch.charCodeAt(0).toString(16) + ' ');
+        }
+
+        // ============================================================
+        // Tiny Markdown renderer (no dependencies)
+        // Supports: H1-H6, fenced code blocks, inline code, bold/italic,
+        // unordered/ordered lists, blockquotes, tables, hr, links, paragraphs.
+        // Good enough for task descriptions and notes.
+        // ============================================================
+        function renderMarkdown(src) {
+            if (!src) return '';
+            const lines = String(src).replace(/\\r\\n/g, '\\n').split('\\n');
+            const out = [];
+            let i = 0;
+
+            const inlineEscape = (s) => escapeHtml(s);
+
+            // Inline formatting: code, bold, italic, strikethrough, links.
+            const renderInline = (s) => {
+                // Replace inline code first to protect its content from other rules.
+                const codeSpans = [];
+                s = s.replace(/\`([^\`]+)\`/g, (_, code) => {
+                    const idx = codeSpans.push('<code>' + inlineEscape(code) + '</code>') - 1;
+                    return '\\u0000CODE' + idx + '\\u0000';
+                });
+                s = inlineEscape(s);
+                // Bold + italic
+                s = s.replace(/\\*\\*\\*([^*]+)\\*\\*\\*/g, '<strong><em>$1</em></strong>');
+                s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+                s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1<em>$2</em>');
+                // Strikethrough
+                s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+                // Links [text](url)
+                s = s.replace(/\\[([^\\]]+)\\]\\(([^)\\s]+)\\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+                // Restore code spans
+                s = s.replace(/\\u0000CODE(\\d+)\\u0000/g, (_, n) => codeSpans[+n]);
+                return s;
+            };
+
+            const flushParagraph = (buf) => {
+                if (buf.length === 0) return;
+                out.push('<p>' + renderInline(buf.join(' ')) + '</p>');
+                buf.length = 0;
+            };
+
+            const paraBuf = [];
+
+            while (i < lines.length) {
+                const line = lines[i];
+
+                // Fenced code block
+                const fence = line.match(/^\\s*\`\`\`(\\w+)?\\s*$/);
+                if (fence) {
+                    flushParagraph(paraBuf);
+                    const lang = fence[1] || '';
+                    const codeLines = [];
+                    i++;
+                    while (i < lines.length && !/^\\s*\`\`\`\\s*$/.test(lines[i])) {
+                        codeLines.push(lines[i]);
+                        i++;
+                    }
+                    if (i < lines.length) i++; // skip closing fence
+                    const cls = lang ? ' class="language-' + escapeAttr(lang) + '"' : '';
+                    out.push('<pre><code' + cls + '>' + escapeHtml(codeLines.join('\\n')) + '</code></pre>');
+                    continue;
+                }
+
+                // ATX heading
+                const heading = line.match(/^(#{1,6})\\s+(.+?)\\s*#*\\s*$/);
+                if (heading) {
+                    flushParagraph(paraBuf);
+                    const level = heading[1].length;
+                    out.push('<h' + level + '>' + renderInline(heading[2]) + '</h' + level + '>');
+                    i++;
+                    continue;
+                }
+
+                // Horizontal rule
+                if (/^\\s*(?:-{3,}|\\*{3,}|_{3,})\\s*$/.test(line)) {
+                    flushParagraph(paraBuf);
+                    out.push('<hr>');
+                    i++;
+                    continue;
+                }
+
+                // Blockquote
+                if (/^\\s*>\\s?/.test(line)) {
+                    flushParagraph(paraBuf);
+                    const quote = [];
+                    while (i < lines.length && /^\\s*>\\s?/.test(lines[i])) {
+                        quote.push(lines[i].replace(/^\\s*>\\s?/, ''));
+                        i++;
+                    }
+                    out.push('<blockquote>' + renderInline(quote.join(' ')) + '</blockquote>');
+                    continue;
+                }
+
+                // Table — needs at least header + separator line
+                if (line.includes('|') && i + 1 < lines.length && /^\\s*\\|?\\s*[:\\-\\s|]+\\s*\\|?\\s*$/.test(lines[i + 1])) {
+                    flushParagraph(paraBuf);
+                    const header = splitTableRow(line);
+                    i += 2;
+                    const rows = [];
+                    while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+                        rows.push(splitTableRow(lines[i]));
+                        i++;
+                    }
+                    let tbl = '<table><thead><tr>' + header.map(c => '<th>' + renderInline(c) + '</th>').join('') + '</tr></thead><tbody>';
+                    for (const r of rows) {
+                        tbl += '<tr>' + r.map(c => '<td>' + renderInline(c) + '</td>').join('') + '</tr>';
+                    }
+                    tbl += '</tbody></table>';
+                    out.push(tbl);
+                    continue;
+                }
+
+                // Unordered list
+                if (/^\\s*[-*+]\\s+/.test(line)) {
+                    flushParagraph(paraBuf);
+                    const items = [];
+                    while (i < lines.length && /^\\s*[-*+]\\s+/.test(lines[i])) {
+                        items.push(lines[i].replace(/^\\s*[-*+]\\s+/, ''));
+                        i++;
+                    }
+                    out.push('<ul>' + items.map(it => '<li>' + renderInline(it) + '</li>').join('') + '</ul>');
+                    continue;
+                }
+
+                // Ordered list
+                if (/^\\s*\\d+[.)]\\s+/.test(line)) {
+                    flushParagraph(paraBuf);
+                    const items = [];
+                    while (i < lines.length && /^\\s*\\d+[.)]\\s+/.test(lines[i])) {
+                        items.push(lines[i].replace(/^\\s*\\d+[.)]\\s+/, ''));
+                        i++;
+                    }
+                    out.push('<ol>' + items.map(it => '<li>' + renderInline(it) + '</li>').join('') + '</ol>');
+                    continue;
+                }
+
+                // Blank line — paragraph boundary
+                if (line.trim() === '') {
+                    flushParagraph(paraBuf);
+                    i++;
+                    continue;
+                }
+
+                // Default: paragraph line
+                paraBuf.push(line);
+                i++;
+            }
+            flushParagraph(paraBuf);
+            return out.join('\\n');
+        }
+
+        function splitTableRow(line) {
+            return line
+                .replace(/^\\s*\\|/, '')
+                .replace(/\\|\\s*$/, '')
+                .split('|')
+                .map(c => c.trim());
+        }
+
+        // ============================================================
+        // Settings tab — unified config UI for embeddings + LLM
+        // ============================================================
+        let settingsState = {
+            data: null,
+            loading: false,
+            saving: false,
+            testing: false,
+            feedback: null,
+            requestSeq: 0,
+        };
+        let settingsRequestId = 0;
+
+        function renderSettingsTab() {
+            const detail = document.getElementById('detail');
+            // Re-render container shell every time (cheap; consistent with other tabs).
+            detail.innerHTML = '<div class="settings-page" id="settingsPage"><div class="loading">Loading settings…</div></div>';
+            loadSettings();
+        }
+
+        function loadSettings() {
+            settingsState.loading = true;
+            settingsRequestId++;
+            const id = settingsRequestId;
+            ws.send(JSON.stringify({ type: 'getSettings', requestId: id }));
+        }
+
+        function handleSettings(msg) {
+            if (msg.requestId !== settingsRequestId) return;
+            settingsState.loading = false;
+            if (msg.error) {
+                document.getElementById('settingsPage').innerHTML =
+                    '<div class="settings-feedback error">Failed to load settings: ' + escapeHtml(msg.error) + '</div>';
+                return;
+            }
+            settingsState.data = msg.data;
+            renderSettingsForm();
+        }
+
+        function handleSettingsSaved(msg) {
+            settingsState.saving = false;
+            if (msg.data) settingsState.data = msg.data;
+            if (msg.result && msg.result.success) {
+                let txt = '✓ Settings saved.';
+                if (msg.result.indexed) {
+                    txt += ' Indexed ' + msg.result.indexed.embedded + ' new vectors in ' +
+                        Math.round(msg.result.indexed.durationMs / 100) / 10 + 's.';
+                }
+                settingsState.feedback = { kind: 'success', text: txt };
+            } else {
+                settingsState.feedback = { kind: 'error', text: 'Save failed: ' + (msg.result && msg.result.error || 'unknown') };
+            }
+            renderSettingsForm();
+            // Auto-clear feedback after 6s
+            setTimeout(() => {
+                settingsState.feedback = null;
+                if (currentDetailTab === 'settings') renderSettingsForm();
+            }, 6000);
+        }
+
+        function handleLlmTestResult(msg) {
+            settingsState.testing = false;
+            const r = msg.data || {};
+            if (r.ok) {
+                settingsState.feedback = {
+                    kind: 'success',
+                    text: '✓ Connected to ' + (r.backend || '?') + ' / ' + (r.model || '?') +
+                          ' — ' + (r.latencyMs || 0) + ' ms',
+                };
+            } else {
+                settingsState.feedback = {
+                    kind: 'error',
+                    text: '✗ Test failed: ' + (r.error || 'unknown error'),
+                };
+            }
+            renderSettingsForm();
+        }
+
+        function renderSettingsForm() {
+            const page = document.getElementById('settingsPage');
+            if (!page) return;
+            const s = settingsState.data;
+            if (!s) return;
+
+            const updateBanner = (s.lastSeenVersion !== s.currentVersion)
+                ? '<div class="settings-update-banner">' +
+                  '<strong>🎉 Welcome to AiDex ' + escapeHtml(s.currentVersion) + '</strong><br>' +
+                  'New: <strong>semantic search</strong> for your code, docs, tasks & notes — and an optional <strong>LLM layer</strong> ' +
+                  'that lets you ask questions in any language. Configure both below. ' +
+                  'Your existing index keeps working as before.' +
+                  '</div>'
+                : '';
+
+            // Embeddings section
+            const e = s.embeddings;
+            const embStatus = e.enabled
+                ? '<span class="settings-status ok">● Active · ' + e.totalEmbeddings + ' vectors · ' + (e.modelId || '?') + '</span>'
+                : '<span class="settings-status off">○ Not enabled</span>';
+            const embModelOpts = e.availableModels.map(m =>
+                '<option value="' + escapeAttr(m.id) + '"' + (e.modelId === m.id ? ' selected' : '') + '>' +
+                escapeHtml(m.id) + ' — ' + escapeHtml(m.description.slice(0, 60)) + '</option>'
+            ).join('');
+            const cachedHint = e.modelCached
+                ? '<span class="settings-status ok" style="margin-left:6px">model cached</span>'
+                : '<span class="settings-status warn" style="margin-left:6px">first run downloads ~100 MB</span>';
+
+            // LLM section
+            const llm = s.llm;
+            const activeBackend = llm.active ? llm.active.backend : null;
+            const llmStatus = llm.active
+                ? '<span class="settings-status ok">● ' + escapeHtml(llm.active.backend) + ' / ' +
+                  escapeHtml(llm.active.model) + ' (' + escapeHtml(llm.active.source) + ')</span>'
+                : '<span class="settings-status off">○ No backend configured (pure embeddings only)</span>';
+
+            // Provider radios
+            const providerRadios = llm.providers.map(p => {
+                const checked = activeBackend === p.backend ? ' checked' : '';
+                const id = 'provider-' + p.backend;
+                return '<div style="margin:4px 0;">' +
+                    '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text-primary);">' +
+                    '<input type="radio" name="provider" id="' + id + '" value="' + p.backend + '"' + checked + '>' +
+                    '<span><strong>' + escapeHtml(p.label) + '</strong>' +
+                    (p.needsKey ? '' : ' <span class="settings-status off">no key needed</span>') +
+                    '<br><span style="color:var(--text-muted);font-size:0.85em;">Default endpoint: <code>' +
+                    escapeHtml(p.defaultEndpoint) + '</code></span></span>' +
+                    '</label></div>';
+            }).join('');
+
+            // Model — datalist (suggested + free typing). Works for every provider, including Custom.
+            const currentProvider = llm.providers.find(p => p.backend === activeBackend) || llm.providers[0];
+            const currentModel = (llm.active && llm.active.model) || llm.file.model || '';
+            const modelDatalistOpts = currentProvider.suggestedModels.map(m =>
+                '<option value="' + escapeAttr(m) + '">'
+            ).join('');
+
+            const apiKeyValue = llm.file.hasKey ? '••••••••••••••••' : '';
+
+            page.innerHTML =
+                updateBanner +
+                '<h2>Settings</h2>' +
+                '<div class="subtitle">Embeddings &amp; LLM configuration · ' + escapeHtml(s.projectPath) + '</div>' +
+
+                // Embeddings card
+                '<div class="settings-section">' +
+                  '<div class="settings-section-title">🧠 Embeddings ' + embStatus + '</div>' +
+                  '<p class="settings-section-help">' +
+                  'Semantic search across code, docs, tasks &amp; notes. Find what you mean, even without the exact identifier name.' +
+                  '</p>' +
+                  '<label class="settings-toggle">' +
+                    '<input type="checkbox" id="embEnabled"' + (e.enabled ? ' checked' : '') + '>' +
+                    '<div>' +
+                      '<span class="label-main">Enable embeddings for this project</span>' +
+                      '<span class="label-help">Indexing takes ~30s per project. Adds ~10 MB to <code>~/.aidex/global.db</code>. ' + cachedHint + '</span>' +
+                    '</div>' +
+                  '</label>' +
+                  '<div class="settings-row">' +
+                    '<label for="embModel">Model</label>' +
+                    '<select id="embModel">' + embModelOpts + '</select>' +
+                  '</div>' +
+                '</div>' +
+
+                // LLM card
+                '<div class="settings-section">' +
+                  '<div class="settings-section-title">🤖 LLM Layer ' + llmStatus + '</div>' +
+                  '<p class="settings-section-help">' +
+                  'Translates non-English queries, expands vague questions, and reranks results by true relevance. ' +
+                  'Optional — pure embeddings work without it.' +
+                  '</p>' +
+                  '<div style="margin:12px 0;">' + providerRadios + '</div>' +
+                  '<div class="settings-row">' +
+                    '<label for="llmEndpoint">Endpoint</label>' +
+                    '<input type="text" id="llmEndpoint" value="' + escapeAttr((llm.active && llm.active.endpoint) || (llm.file.endpoint || '')) + '" placeholder="https://api.anthropic.com">' +
+                  '</div>' +
+                  '<div class="settings-row">' +
+                    '<label for="llmModel">Model</label>' +
+                    '<input list="llmModelList" id="llmModel" type="text" ' +
+                    'value="' + escapeAttr(currentModel) + '" ' +
+                    'placeholder="' + escapeAttr(currentProvider.suggestedModels[0] || 'model name') + '">' +
+                    '<datalist id="llmModelList">' + modelDatalistOpts + '</datalist>' +
+                  '</div>' +
+                  '<div class="settings-row">' +
+                    '<label for="llmKey">API Key</label>' +
+                    '<input type="password" id="llmKey" value="' + escapeAttr(apiKeyValue) + '" placeholder="(leave blank to keep current)">' +
+                    '<button type="button" class="settings-btn" id="toggleKeyVisible">Show</button>' +
+                  '</div>' +
+                  '<div class="settings-info">🔒 Stored in <code>~/.aidex/llm.json</code> (chmod 600). Never shown back to the chat.</div>' +
+
+                  // Privacy switch
+                  '<label class="settings-toggle" style="margin-top:14px;">' +
+                    '<input type="checkbox" id="llmSendCode"' + (llm.sendCode ? ' checked' : '') + '>' +
+                    '<div>' +
+                      '<span class="label-main">Allow code snippets to be sent to the LLM</span>' +
+                      '<span class="label-help">' +
+                        '<strong>Default: OFF.</strong> When off, only your query and metadata (file paths, names) leave the box. ' +
+                        'When on, snippets of method bodies and doc sections are sent during reranking — ' +
+                        'better results, but only for non-confidential projects.' +
+                      '</span>' +
+                    '</div>' +
+                  '</label>' +
+                '</div>' +
+
+                // Actions
+                '<div class="settings-actions">' +
+                  '<button type="button" class="settings-btn primary" id="saveSettings"' + (settingsState.saving ? ' disabled' : '') + '>' +
+                    (settingsState.saving ? 'Saving…' : 'Save settings') +
+                  '</button>' +
+                  '<button type="button" class="settings-btn" id="testConn"' + (settingsState.testing ? ' disabled' : '') + '>' +
+                    (settingsState.testing ? 'Testing…' : 'Test connection') +
+                  '</button>' +
+                '</div>' +
+
+                (settingsState.feedback
+                    ? '<div class="settings-feedback ' + settingsState.feedback.kind + '">' + escapeHtml(settingsState.feedback.text) + '</div>'
+                    : '');
+
+            wireSettingsForm();
+        }
+
+        function wireSettingsForm() {
+            const saveBtn = document.getElementById('saveSettings');
+            if (saveBtn) saveBtn.addEventListener('click', saveSettings);
+
+            const testBtn = document.getElementById('testConn');
+            if (testBtn) testBtn.addEventListener('click', runConnectionTest);
+
+            const showBtn = document.getElementById('toggleKeyVisible');
+            if (showBtn) {
+                showBtn.addEventListener('click', () => {
+                    const inp = document.getElementById('llmKey');
+                    if (!inp) return;
+                    inp.type = inp.type === 'password' ? 'text' : 'password';
+                    showBtn.textContent = inp.type === 'password' ? 'Show' : 'Hide';
+                });
+            }
+
+            // When provider changes, swap suggested model list + suggested endpoint
+            document.querySelectorAll('input[name="provider"]').forEach(r => {
+                r.addEventListener('change', (ev) => {
+                    const backend = ev.target.value;
+                    const provider = settingsState.data.llm.providers.find(p => p.backend === backend);
+                    if (!provider) return;
+                    const datalist = document.getElementById('llmModelList');
+                    if (datalist) {
+                        datalist.innerHTML = provider.suggestedModels
+                            .map(m => '<option value="' + escapeAttr(m) + '">').join('');
+                    }
+                    const modelInput = document.getElementById('llmModel');
+                    if (modelInput) {
+                        modelInput.placeholder = provider.suggestedModels[0] || 'model name';
+                        // Clear value when switching provider unless user already typed something custom.
+                        if (!modelInput.value || isKnownModel(modelInput.value)) {
+                            modelInput.value = '';
+                        }
+                    }
+                    const endpointInput = document.getElementById('llmEndpoint');
+                    if (endpointInput && (!endpointInput.value || isKnownEndpoint(endpointInput.value))) {
+                        endpointInput.value = provider.defaultEndpoint;
+                    }
+                });
+            });
+        }
+
+        function isKnownEndpoint(url) {
+            const knowns = [
+                'https://api.anthropic.com',
+                'https://api.openai.com/v1',
+                'https://openrouter.ai/api/v1',
+                'http://localhost:11434',
+                'https://api.example.com/v1',
+            ];
+            return knowns.some(k => url.startsWith(k));
+        }
+
+        function isKnownModel(name) {
+            // Any name that appears in any provider's suggestion list is "known" — safe to clear.
+            if (!settingsState.data) return false;
+            for (const p of settingsState.data.llm.providers) {
+                if (p.suggestedModels.includes(name)) return true;
+            }
+            return false;
+        }
+
+        function saveSettings() {
+            if (settingsState.saving) return;
+            const enableEmb = document.getElementById('embEnabled').checked;
+            const embModel = document.getElementById('embModel').value;
+            const endpoint = document.getElementById('llmEndpoint').value.trim();
+            const model = document.getElementById('llmModel').value;
+            const keyRaw = document.getElementById('llmKey').value;
+            const sendCode = document.getElementById('llmSendCode').checked;
+
+            const payload = {
+                enableEmbeddings: enableEmb,
+                embeddingModel: embModel,
+                llmEndpoint: endpoint || null,
+                llmModel: model || null,
+                llmSendCode: sendCode,
+            };
+            // Only send API key if user typed something different from the masked placeholder.
+            if (keyRaw && !/^•+$/.test(keyRaw)) payload.llmApiKey = keyRaw;
+
+            settingsState.saving = true;
+            settingsState.feedback = null;
+            renderSettingsForm();
+            settingsRequestId++;
+            ws.send(JSON.stringify({ type: 'setSettings', payload, requestId: settingsRequestId }));
+        }
+
+        function runConnectionTest() {
+            if (settingsState.testing) return;
+            settingsState.testing = true;
+            settingsState.feedback = null;
+            renderSettingsForm();
+            settingsRequestId++;
+            ws.send(JSON.stringify({ type: 'testLlmConnection', requestId: settingsRequestId }));
         }
 
         function renderLogView() {
