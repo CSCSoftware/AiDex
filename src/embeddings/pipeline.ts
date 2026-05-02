@@ -74,6 +74,25 @@ const NOT_YET = (what: string) =>
 
 const BATCH_SIZE = 32;
 
+/**
+ * De-duplicate writes by (sourceType, sourcePath, sourceAnchor). Some sources
+ * legitimately produce more than one write for the same DB key (C typedef
+ * structs, repeated Markdown headings, etc.). Without this filter, the first
+ * `bulkUpsert` writes one and the next call sees a hash mismatch from "the
+ * other one" — causing perpetual drift on re-index. First entry wins.
+ */
+function dedupeWrites(writes: EmbeddingWrite[]): EmbeddingWrite[] {
+    const seen = new Set<string>();
+    const out: EmbeddingWrite[] = [];
+    for (const w of writes) {
+        const key = `${w.sourceType}:${w.sourcePath ?? ''}:${w.sourceAnchor ?? ''}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(w);
+    }
+    return out;
+}
+
 class RealEmbeddings implements EmbeddingsModule {
     private schemaReady = false;
     private embedder: Embedder | null = null;
@@ -394,6 +413,8 @@ class RealEmbeddings implements EmbeddingsModule {
         embedder: Embedder,
         force: boolean
     ): Promise<{ embedded: number; skipped: number; removed: number }> {
+        // De-dup before hash-skip — same rationale as embedAndUpsertLazy.
+        writes = dedupeWrites(writes);
         // Hash-skip: if content_hash matches what's in DB, we won't re-embed.
         const existingHashes = readExistingHashes(project.id);
 
@@ -440,10 +461,19 @@ class RealEmbeddings implements EmbeddingsModule {
         writes: EmbeddingWrite[],
         force: boolean
     ): Promise<{ embedded: number; skipped: number; removed: number }> {
+        // De-duplicate by (sourceType, sourcePath, sourceAnchor). Different
+        // sources can occasionally produce two writes with the same key but
+        // different content — e.g. C `typedef struct X` is recorded as both
+        // "class X" and "struct X" on the same line, or a Markdown file
+        // contains two sections with identical headings. Without this filter,
+        // bulkUpsert writes one and the next re-index sees a hash mismatch
+        // (the *other* write wins), causing endless ping-pong drift on every
+        // call. First write wins — deterministic and matches read order.
+        const dedupedWrites = dedupeWrites(writes);
         const existingHashes = readExistingHashes(project.id);
         const toEmbed: EmbeddingWrite[] = [];
         let shortcutCount = 0;
-        for (const w of writes) {
+        for (const w of dedupedWrites) {
             const key = `${w.sourceType}:${w.sourcePath ?? ''}:${w.sourceAnchor ?? ''}`;
             const prev = existingHashes.get(key);
             if (!force && prev === w.contentHash) {
