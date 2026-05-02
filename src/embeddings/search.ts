@@ -371,6 +371,48 @@ async function runSemantic(
 // ============================================================
 
 /**
+ * Tokenise an NL query for the exact-identifier pipeline.
+ *
+ * Identifiers don't contain spaces, so feeding the raw NL query
+ * (e.g. "how do I extract a thumbnail") to a LIKE search produces zero
+ * matches and reduces hybrid to pure-semantic. We split on non-word
+ * characters, drop trivial stopwords + tokens shorter than 3 chars,
+ * and let each remaining token probe the identifier table.
+ *
+ * For a single-token query (e.g. "Thumbnail") this returns the original
+ * untouched, so hybrid behaviour for code-style queries is unchanged.
+ */
+const NL_STOPWORDS = new Set([
+    'the', 'and', 'for', 'how', 'what', 'why', 'who', 'when', 'where',
+    'this', 'that', 'these', 'those', 'with', 'from', 'into', 'onto',
+    'can', 'does', 'did', 'are', 'was', 'were', 'will', 'would', 'should',
+    'could', 'have', 'has', 'had', 'you', 'your', 'our', 'they', 'them',
+    'his', 'her', 'its', 'all', 'any', 'some', 'one', 'two', 'not',
+    'but', 'use', 'using', 'used', 'about', 'just',
+]);
+
+function tokenizeForExact(query: string): string[] {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+    // Single non-whitespace token → likely an identifier, pass through.
+    if (!/\s/.test(trimmed)) return [trimmed];
+    const raw = trimmed.split(/[^A-Za-z0-9_]+/).filter(Boolean);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const t of raw) {
+        if (t.length < 3) continue;
+        const lower = t.toLowerCase();
+        if (NL_STOPWORDS.has(lower)) continue;
+        if (seen.has(lower)) continue;
+        seen.add(lower);
+        out.push(t);
+    }
+    // If filtering removed everything, fall back to the raw query so we
+    // at least try one LIKE rather than silently returning [].
+    return out.length > 0 ? out : [trimmed];
+}
+
+/**
  * Does the given source_kind pass `opts.sourceKinds`?
  * Mirrors the SQL `e.source_kind IN (...)` filter from runSemantic so
  * both pipelines stay in sync (otherwise hybrid leaks code hits when
@@ -401,7 +443,13 @@ function runExactAcrossProjects(
     // — otherwise hybrid would smuggle code hits past a docs/workspace filter.
     if (!passesKindFilter('code', opts)) return [];
 
+    // NL queries get tokenised here. A single-token query (typical "find
+    // identifier X" use case) flows through unchanged.
+    const tokens = tokenizeForExact(opts.query);
+    if (tokens.length === 0) return [];
+
     const hits: SearchHit[] = [];
+    const seenKey = new Set<string>();
     let rank = 1;
 
     // Read each project's local index.db read-only; query identifiers.
@@ -414,14 +462,22 @@ function runExactAcrossProjects(
             continue;
         }
         try {
-            const term = opts.query;
-            const itemRows = local.prepare(
+            // Collect items matching ANY token (union); de-dup by item id.
+            const itemMap = new Map<number, string>();
+            const itemStmt = local.prepare(
                 `SELECT id, term FROM items WHERE term LIKE ? ESCAPE '\\' COLLATE NOCASE LIMIT 200`
-            ).all('%' + term.replace(/[\\%_]/g, '\\$&') + '%') as Array<{ id: number; term: string }>;
-            if (itemRows.length === 0) continue;
+            );
+            for (const tok of tokens) {
+                const like = '%' + tok.replace(/[\\%_]/g, '\\$&') + '%';
+                const rows = itemStmt.all(like) as Array<{ id: number; term: string }>;
+                for (const r of rows) {
+                    if (!itemMap.has(r.id)) itemMap.set(r.id, r.term);
+                }
+            }
+            if (itemMap.size === 0) continue;
 
             // Pull occurrences for these items, with file+line context.
-            const itemIds = itemRows.map(r => r.id);
+            const itemIds = Array.from(itemMap.keys());
             const occ = local
                 .prepare(
                     `SELECT i.term as term, f.path as file_path, l.line_number as line, l.line_type as line_type
@@ -444,6 +500,10 @@ function runExactAcrossProjects(
                 const sourceType: SourceType = (o.line_type as SourceType) ?? 'method';
                 // Honour the same source_types filter the semantic side applies.
                 if (!passesTypeFilter(sourceType, opts)) continue;
+                // De-dup across token-union (same identifier may match multiple tokens).
+                const dedupKey = `${proj.path}::${o.file_path}::${o.line}::${o.term}`;
+                if (seenKey.has(dedupKey)) continue;
+                seenKey.add(dedupKey);
                 hits.push({
                     projectPath: proj.path,
                     projectName: proj.name,
