@@ -11,7 +11,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc && npm run copy-assets",
-    "copy-assets": "node -e \"const fs=require('fs');fs.cpSync('src/db/schema.sql','build/db/schema.sql');fs.cpSync('src/db/global-schema.sql','build/db/global-schema.sql')\"",
+    "copy-assets": "node -e \"const fs=require('fs');fs.cpSync('src/db/schema.sql','build/db/schema.sql');fs.cpSync('src/db/global-schema.sql','build/db/global-schema.sql');fs.cpSync('src/embeddings/schema.sql','build/embeddings/schema.sql')\"",
     "watch": "tsc --watch",
     "start": "node build/index.js",
     "dev": "tsc && node build/index.js",
