@@ -458,6 +458,16 @@ function computeUpdateBanner(): string | null {
             const current = readPkgVersion();
             if (!current) return null;
             if (seen === current) return null;
+            if (current.startsWith('2.')) {
+                return (
+                    `🚀 AiDex ${current} — Major Release! ` +
+                    `Your code index just grew a brain: semantic search across code, docs & tasks ` +
+                    `(jina-code embeddings, 768d) plus an optional LLM layer for multilingual queries ` +
+                    `and reranking (Anthropic / OpenAI / OpenRouter / Ollama). ` +
+                    `New Viewer Settings tab puts everything one click away — privacy-switch defaults to OFF. ` +
+                    `Get started: aidex_settings({ path: "...", open: true }).`
+                );
+            }
             return (
                 `🎉 AiDex ${current} — new features available! ` +
                 `Semantic search across code, docs & tasks, plus an optional LLM layer ` +
