@@ -311,8 +311,9 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
                 }
                 else if (msg.type === 'setSettings' && msg.payload) {
                     try {
-                        const { setSettings, getSettings } = await import('../llm/settings.js');
-                        const result = await setSettings(projectPath, msg.payload);
+                        const { setSettings, getSettings, validateSetSettingsPayload } = await import('../llm/settings.js');
+                        const validated = validateSetSettingsPayload(msg.payload);
+                        const result = await setSettings(projectPath, validated);
                         const updated = await getSettings(projectPath);
                         ws.send(JSON.stringify({
                             type: 'settingsSaved',
@@ -345,7 +346,7 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
                     const requestId = msg.requestId;
                     try {
                         const { getEmbeddings } = await import('../embeddings/index.js');
-                        const hits = await getEmbeddings().search({
+                        const r = await getEmbeddings().searchWithTelemetry({
                             query: msg.query,
                             path: projectPath,
                             scope: (msg.scope as 'current' | 'all' | 'linked' | undefined) ?? 'current',
@@ -353,7 +354,7 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
                             mode: (msg.mode as 'semantic' | 'hybrid' | 'exact' | undefined) ?? 'hybrid',
                             k: typeof msg.k === 'number' ? msg.k : 20,
                         });
-                        ws.send(JSON.stringify({ type: 'searchResults', requestId, hits }));
+                        ws.send(JSON.stringify({ type: 'searchResults', requestId, hits: r.hits, telemetry: r.telemetry }));
                     } catch (err) {
                         ws.send(JSON.stringify({
                             type: 'searchResults',
@@ -385,7 +386,7 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
     });
 
     return new Promise((resolve, reject) => {
-        server!.listen(PORT, () => {
+        server!.listen(PORT, '127.0.0.1', () => {
             const url = `http://localhost:${PORT}${hash}`;
             console.error(`[Viewer] Server running at ${url}`);
 
@@ -1486,6 +1487,28 @@ function getViewerHTML(projectPath: string): string {
         .search-k-row { display: flex; align-items: center; gap: 8px; font-size: 0.85em; color: var(--text-muted); }
         .search-k-row input[type="range"] { flex: 1; accent-color: var(--accent-cyan); }
         .search-results { padding: 0; }
+        .search-telemetry {
+            margin: 0 0 10px 0;
+            padding: 6px 10px;
+            border-radius: 4px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 0.85em;
+        }
+        .search-telemetry.off { color: var(--text-muted); }
+        .search-telemetry.rewrites { background: transparent; border: none; color: var(--text-muted); padding: 2px 10px; }
+        .search-telemetry.err { background: rgba(247, 118, 142, 0.1); border-color: var(--accent-red); color: var(--accent-red); }
+        .llm-tag {
+            display: inline-block;
+            padding: 1px 6px;
+            margin: 0 3px 0 0;
+            border-radius: 3px;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        .llm-tag.ok { background: rgba(158, 206, 106, 0.15); color: var(--accent-green); }
+        .llm-tag.fail { background: rgba(247, 118, 142, 0.15); color: var(--accent-red); }
         .search-hint {
             padding: 24px 16px;
             color: var(--text-muted);
@@ -1693,6 +1716,61 @@ function getViewerHTML(projectPath: string): string {
         .settings-row input:focus, .settings-row select:focus {
             outline: none;
             border-color: var(--accent-cyan);
+        }
+        /* Custom combobox — input + dropdown that always shows ALL options */
+        .combo {
+            position: relative;
+            flex: 1;
+            display: flex;
+        }
+        .combo input[type="text"] {
+            flex: 1;
+            padding-right: 30px;
+        }
+        .combo-toggle {
+            position: absolute;
+            right: 1px;
+            top: 1px;
+            bottom: 1px;
+            width: 28px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.9em;
+            border-left: 1px solid var(--border);
+        }
+        .combo-toggle:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+        .combo-list {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            margin-top: 2px;
+            max-height: 240px;
+            overflow-y: auto;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+        .combo.open .combo-list {
+            display: block;
+        }
+        .combo-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            color: var(--text-primary);
+            font-size: 0.9em;
+        }
+        .combo-option:hover {
+            background: var(--bg-tertiary);
+            color: var(--accent-cyan);
         }
         .settings-toggle {
             display: flex;
@@ -2511,9 +2589,11 @@ function getViewerHTML(projectPath: string): string {
             if (msg.error) {
                 searchState.error = msg.error;
                 searchState.results = null;
+                searchState.telemetry = null;
             } else {
                 searchState.error = null;
                 searchState.results = Array.isArray(msg.hits) ? msg.hits : [];
+                searchState.telemetry = msg.telemetry || null;
             }
             if (currentDetailTab === 'search') renderSearchResults();
         }
@@ -2538,10 +2618,10 @@ function getViewerHTML(projectPath: string): string {
                 return;
             }
             if (searchState.results.length === 0) {
-                container.innerHTML = '<div class="search-hint">No matches.</div>';
+                container.innerHTML = renderSearchTelemetry(searchState.telemetry) + '<div class="search-hint">No matches.</div>';
                 return;
             }
-            container.innerHTML = searchState.results.map(renderHit).join('');
+            container.innerHTML = renderSearchTelemetry(searchState.telemetry) + searchState.results.map(renderHit).join('');
             container.querySelectorAll('.search-result').forEach(el => {
                 el.addEventListener('click', (ev) => {
                     try {
@@ -2572,6 +2652,26 @@ function getViewerHTML(projectPath: string): string {
                     }
                 });
             });
+        }
+
+        function renderSearchTelemetry(t) {
+            if (!t) return '';
+            const tags = [];
+            if (t.translateRan) tags.push(t.translateFailed ? '<span class="llm-tag fail">translate ✗</span>' : '<span class="llm-tag ok">translate ✓</span>');
+            if (t.expandRan) tags.push(t.expandFailed ? '<span class="llm-tag fail">expand ✗</span>' : '<span class="llm-tag ok">expand ✓</span>');
+            if (t.rerankRan) tags.push(t.rerankFailed ? '<span class="llm-tag fail">rerank ✗</span>' : '<span class="llm-tag ok">rerank ✓</span>');
+            if (tags.length === 0) {
+                return '<div class="search-telemetry off">○ Pure embeddings (LLM layer not used)</div>';
+            }
+            let html = '<div class="search-telemetry on">🤖 LLM: ' + tags.join(' ') + '</div>';
+            if (t.queriesUsed && t.queriesUsed.length > 1) {
+                html += '<div class="search-telemetry rewrites">Rewrites: ' +
+                    t.queriesUsed.map(q => '<code>' + escapeHtml(q) + '</code>').join(' · ') + '</div>';
+            }
+            if (t.lastError) {
+                html += '<div class="search-telemetry err">LLM error: ' + escapeHtml(t.lastError) + '</div>';
+            }
+            return html;
         }
 
         function renderHit(h) {
@@ -2772,30 +2872,41 @@ function getViewerHTML(projectPath: string): string {
         }
 
         // ============================================================
-        // Settings tab — unified config UI for embeddings + LLM
+        // Settings tab — single source of truth: formState
+        //
+        // Architecture:
+        //   - settingsState.data       = read-only mirror of server state
+        //                                (llm.active, llm.file, embeddings, …)
+        //   - settingsState.form       = THE truth for what the form shows.
+        //                                Every input/checkbox/radio reflects
+        //                                exactly one form field.
+        //   - render() builds DOM from form. Always full re-render.
+        //   - User events update form, then call render(). Period.
+        //   - Save/Test send form to server. On success the form is *kept*
+        //     (the user's intent wins); only data is refreshed.
         // ============================================================
         let settingsState = {
-            data: null,
+            data: null,           // server state: { embeddings, llm, projectPath, ... }
+            form: null,           // form state (see makeFormFromData)
             loading: false,
             saving: false,
             testing: false,
+            testPending: false,
             feedback: null,
-            requestSeq: 0,
         };
         let settingsRequestId = 0;
 
         function renderSettingsTab() {
             const detail = document.getElementById('detail');
-            // Re-render container shell every time (cheap; consistent with other tabs).
             detail.innerHTML = '<div class="settings-page" id="settingsPage"><div class="loading">Loading settings…</div></div>';
+            settingsState.form = null;
             loadSettings();
         }
 
         function loadSettings() {
             settingsState.loading = true;
             settingsRequestId++;
-            const id = settingsRequestId;
-            ws.send(JSON.stringify({ type: 'getSettings', requestId: id }));
+            ws.send(JSON.stringify({ type: 'getSettings', requestId: settingsRequestId }));
         }
 
         function handleSettings(msg) {
@@ -2807,13 +2918,33 @@ function getViewerHTML(projectPath: string): string {
                 return;
             }
             settingsState.data = msg.data;
-            renderSettingsForm();
+            // Build initial form state from server data — only on first load,
+            // or after a hard reload of the tab.
+            settingsState.form = makeFormFromData(msg.data);
+            render();
         }
 
         function handleSettingsSaved(msg) {
             settingsState.saving = false;
             if (msg.data) settingsState.data = msg.data;
-            if (msg.result && msg.result.success) {
+            const success = !!(msg.result && msg.result.success);
+
+            // Test queued? Don't toast — fire the test, let it deliver its toast.
+            if (settingsState.testPending) {
+                settingsState.testPending = false;
+                if (!success) {
+                    settingsState.testing = false;
+                    settingsState.feedback = { kind: 'error', text: 'Save failed before test: ' + (msg.result && msg.result.error || 'unknown') };
+                    render();
+                    return;
+                }
+                settingsRequestId++;
+                ws.send(JSON.stringify({ type: 'testLlmConnection', requestId: settingsRequestId }));
+                render();
+                return;
+            }
+
+            if (success) {
                 let txt = '✓ Settings saved.';
                 if (msg.result.indexed) {
                     txt += ' Indexed ' + msg.result.indexed.embedded + ' new vectors in ' +
@@ -2823,75 +2954,95 @@ function getViewerHTML(projectPath: string): string {
             } else {
                 settingsState.feedback = { kind: 'error', text: 'Save failed: ' + (msg.result && msg.result.error || 'unknown') };
             }
-            renderSettingsForm();
-            // Auto-clear feedback after 6s
+            // After save: clear the API-key input so the masked stored-key state
+            // becomes visible (form.apiKeyInput is the user's *pending* input).
+            if (success && settingsState.form) {
+                settingsState.form.apiKeyInput = '';
+            }
+            render();
             setTimeout(() => {
                 settingsState.feedback = null;
-                if (currentDetailTab === 'settings') renderSettingsForm();
+                if (currentDetailTab === 'settings') render();
             }, 6000);
         }
 
         function handleLlmTestResult(msg) {
             settingsState.testing = false;
             const r = msg.data || {};
-            if (r.ok) {
-                settingsState.feedback = {
-                    kind: 'success',
-                    text: '✓ Connected to ' + (r.backend || '?') + ' / ' + (r.model || '?') +
-                          ' — ' + (r.latencyMs || 0) + ' ms',
-                };
-            } else {
-                settingsState.feedback = {
-                    kind: 'error',
-                    text: '✗ Test failed: ' + (r.error || 'unknown error'),
-                };
-            }
-            renderSettingsForm();
+            settingsState.feedback = r.ok
+                ? { kind: 'success', text: '✓ Connected to ' + (r.backend || '?') + ' / ' + (r.model || '?') + ' — ' + (r.latencyMs || 0) + ' ms' }
+                : { kind: 'error', text: '✗ Test failed: ' + (r.error || 'unknown error') };
+            render();
         }
 
-        function renderSettingsForm() {
-            const page = document.getElementById('settingsPage');
-            if (!page) return;
-            const s = settingsState.data;
-            if (!s) return;
+        // Build form state from a fresh server snapshot.
+        function makeFormFromData(data) {
+            const llm = data.llm;
+            // Pick the backend the form should preselect: active wins, else
+            // first provider that needs a key.
+            const backend = (llm.active && llm.active.backend) || 'openai';
+            const provider = llm.providers.find(p => p.backend === backend) || llm.providers[0];
+            return {
+                backend: backend,
+                endpoint: (llm.active && llm.active.endpoint) || (llm.file.endpoint || provider.defaultEndpoint),
+                model: (llm.active && llm.active.model) || (llm.file.model || ''),
+                apiKeyInput: '',          // user's pending input
+                apiKeyVisible: false,     // toggle for show/hide button
+                sendCode: !!llm.sendCode,
+                llmEnabled: !!llm.enabled,
+                enableEmbeddings: !!data.embeddings.enabled,
+                embeddingModel: data.embeddings.modelId || (data.embeddings.availableModels[0] && data.embeddings.availableModels[0].id) || 'jina-code',
+                modelDropdownOpen: false, // custom dropdown state
+            };
+        }
 
-            const updateBanner = (s.lastSeenVersion !== s.currentVersion)
+        // ============================================================
+        // Render — pure function of state, builds HTML in one pass
+        // ============================================================
+        function render() {
+            const page = document.getElementById('settingsPage');
+            if (!page || !settingsState.data || !settingsState.form) return;
+
+            const data = settingsState.data;
+            const form = settingsState.form;
+            const llm = data.llm;
+            const provider = llm.providers.find(p => p.backend === form.backend) || llm.providers[0];
+
+            // ---- Update banner ----
+            const updateBanner = (data.lastSeenVersion !== data.currentVersion)
                 ? '<div class="settings-update-banner">' +
-                  '<strong>🎉 Welcome to AiDex ' + escapeHtml(s.currentVersion) + '</strong><br>' +
-                  'New: <strong>semantic search</strong> for your code, docs, tasks & notes — and an optional <strong>LLM layer</strong> ' +
+                  '<strong>🎉 Welcome to AiDex ' + escapeHtml(data.currentVersion) + '</strong><br>' +
+                  'New: <strong>semantic search</strong> for your code, docs, tasks &amp; notes — and an optional <strong>LLM layer</strong> ' +
                   'that lets you ask questions in any language. Configure both below. ' +
                   'Your existing index keeps working as before.' +
                   '</div>'
                 : '';
 
-            // Embeddings section
-            const e = s.embeddings;
+            // ---- Embeddings card ----
+            const e = data.embeddings;
             const embStatus = e.enabled
                 ? '<span class="settings-status ok">● Active · ' + e.totalEmbeddings + ' vectors · ' + (e.modelId || '?') + '</span>'
                 : '<span class="settings-status off">○ Not enabled</span>';
             const embModelOpts = e.availableModels.map(m =>
-                '<option value="' + escapeAttr(m.id) + '"' + (e.modelId === m.id ? ' selected' : '') + '>' +
+                '<option value="' + escapeAttr(m.id) + '"' + (form.embeddingModel === m.id ? ' selected' : '') + '>' +
                 escapeHtml(m.id) + ' — ' + escapeHtml(m.description.slice(0, 60)) + '</option>'
             ).join('');
             const cachedHint = e.modelCached
                 ? '<span class="settings-status ok" style="margin-left:6px">model cached</span>'
                 : '<span class="settings-status warn" style="margin-left:6px">first run downloads ~100 MB</span>';
 
-            // LLM section
-            const llm = s.llm;
-            const activeBackend = llm.active ? llm.active.backend : null;
+            // ---- LLM status badge (uses data.llm.active, not form) ----
             const llmStatus = llm.active
                 ? '<span class="settings-status ok">● ' + escapeHtml(llm.active.backend) + ' / ' +
                   escapeHtml(llm.active.model) + ' (' + escapeHtml(llm.active.source) + ')</span>'
                 : '<span class="settings-status off">○ No backend configured (pure embeddings only)</span>';
 
-            // Provider radios
+            // ---- Provider radios ----
             const providerRadios = llm.providers.map(p => {
-                const checked = activeBackend === p.backend ? ' checked' : '';
-                const id = 'provider-' + p.backend;
+                const checked = form.backend === p.backend ? ' checked' : '';
                 return '<div style="margin:4px 0;">' +
                     '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text-primary);">' +
-                    '<input type="radio" name="provider" id="' + id + '" value="' + p.backend + '"' + checked + '>' +
+                    '<input type="radio" name="provider" value="' + p.backend + '"' + checked + '>' +
                     '<span><strong>' + escapeHtml(p.label) + '</strong>' +
                     (p.needsKey ? '' : ' <span class="settings-status off">no key needed</span>') +
                     '<br><span style="color:var(--text-muted);font-size:0.85em;">Default endpoint: <code>' +
@@ -2899,193 +3050,277 @@ function getViewerHTML(projectPath: string): string {
                     '</label></div>';
             }).join('');
 
-            // Model — datalist (suggested + free typing). Works for every provider, including Custom.
-            const currentProvider = llm.providers.find(p => p.backend === activeBackend) || llm.providers[0];
-            const currentModel = (llm.active && llm.active.model) || llm.file.model || '';
-            const modelDatalistOpts = currentProvider.suggestedModels.map(m =>
-                '<option value="' + escapeAttr(m) + '">'
+            // ---- Model — custom dropdown (always shows ALL provider models) ----
+            const modelOptions = provider.suggestedModels.map(m =>
+                '<div class="combo-option" data-value="' + escapeAttr(m) + '">' + escapeHtml(m) + '</div>'
             ).join('');
+            const modelPlaceholder = provider.suggestedModels[0] || 'model name';
+            const dropdownOpenClass = form.modelDropdownOpen ? ' open' : '';
 
-            const apiKeyValue = llm.file.hasKey ? '••••••••••••••••' : '';
+            // ---- API-key placeholder/hint — purely a function of form.backend + data.llm.file ----
+            const apiKey = computeApiKeyHint(provider, llm.file);
+            const keyDisabled = !provider.needsKey;
+            const keyType = (form.apiKeyVisible && !keyDisabled) ? 'text' : 'password';
 
             page.innerHTML =
                 updateBanner +
                 '<h2>Settings</h2>' +
-                '<div class="subtitle">Embeddings &amp; LLM configuration · ' + escapeHtml(s.projectPath) + '</div>' +
+                '<div class="subtitle">Embeddings &amp; LLM configuration · ' + escapeHtml(data.projectPath) + '</div>' +
 
-                // Embeddings card
+                // Embeddings card (also hosts the LLM-Layer master toggle, since
+                // LLM is currently only useful in the embedding-search pipeline).
                 '<div class="settings-section">' +
                   '<div class="settings-section-title">🧠 Embeddings ' + embStatus + '</div>' +
-                  '<p class="settings-section-help">' +
-                  'Semantic search across code, docs, tasks &amp; notes. Find what you mean, even without the exact identifier name.' +
-                  '</p>' +
+                  '<p class="settings-section-help">Semantic search across code, docs, tasks &amp; notes. Find what you mean, even without the exact identifier name.</p>' +
                   '<label class="settings-toggle">' +
-                    '<input type="checkbox" id="embEnabled"' + (e.enabled ? ' checked' : '') + '>' +
+                    '<input type="checkbox" id="embEnabled"' + (form.enableEmbeddings ? ' checked' : '') + '>' +
                     '<div>' +
                       '<span class="label-main">Enable embeddings for this project</span>' +
                       '<span class="label-help">Indexing takes ~30s per project. Adds ~10 MB to <code>~/.aidex/global.db</code>. ' + cachedHint + '</span>' +
                     '</div>' +
                   '</label>' +
-                  '<div class="settings-row">' +
-                    '<label for="embModel">Model</label>' +
-                    '<select id="embModel">' + embModelOpts + '</select>' +
-                  '</div>' +
+                  (form.enableEmbeddings
+                    ? '<div class="settings-row">' +
+                        '<label for="embModel">Model</label>' +
+                        '<select id="embModel">' + embModelOpts + '</select>' +
+                      '</div>' +
+                      // LLM-layer sub-toggle — only shown when embeddings are enabled.
+                      '<label class="settings-toggle" style="margin-top:14px;padding-left:8px;border-left:2px solid var(--border);">' +
+                        '<input type="checkbox" id="llmEnabled"' + (form.llmEnabled ? ' checked' : '') + '>' +
+                        '<div>' +
+                          '<span class="label-main">Enable LLM Layer (translation &amp; reranking)</span>' +
+                          '<span class="label-help">Optional. Adds query translation (non-English queries), expansion, and result reranking. Needs an API key from one of the supported providers.</span>' +
+                        '</div>' +
+                      '</label>'
+                    : '') +
                 '</div>' +
 
-                // LLM card
-                '<div class="settings-section">' +
-                  '<div class="settings-section-title">🤖 LLM Layer ' + llmStatus + '</div>' +
-                  '<p class="settings-section-help">' +
-                  'Translates non-English queries, expands vague questions, and reranks results by true relevance. ' +
-                  'Optional — pure embeddings work without it.' +
-                  '</p>' +
-                  '<div style="margin:12px 0;">' + providerRadios + '</div>' +
-                  '<div class="settings-row">' +
-                    '<label for="llmEndpoint">Endpoint</label>' +
-                    '<input type="text" id="llmEndpoint" value="' + escapeAttr((llm.active && llm.active.endpoint) || (llm.file.endpoint || '')) + '" placeholder="https://api.anthropic.com">' +
-                  '</div>' +
-                  '<div class="settings-row">' +
-                    '<label for="llmModel">Model</label>' +
-                    '<input list="llmModelList" id="llmModel" type="text" ' +
-                    'value="' + escapeAttr(currentModel) + '" ' +
-                    'placeholder="' + escapeAttr(currentProvider.suggestedModels[0] || 'model name') + '">' +
-                    '<datalist id="llmModelList">' + modelDatalistOpts + '</datalist>' +
-                  '</div>' +
-                  '<div class="settings-row">' +
-                    '<label for="llmKey">API Key</label>' +
-                    '<input type="password" id="llmKey" value="' + escapeAttr(apiKeyValue) + '" placeholder="(leave blank to keep current)">' +
-                    '<button type="button" class="settings-btn" id="toggleKeyVisible">Show</button>' +
-                  '</div>' +
-                  '<div class="settings-info">🔒 Stored in <code>~/.aidex/llm.json</code> (chmod 600). Never shown back to the chat.</div>' +
+                // LLM card — only when embeddings AND llm-layer toggle are on.
+                ((form.enableEmbeddings && form.llmEnabled)
+                  ? '<div class="settings-section">' +
+                      '<div class="settings-section-title">🤖 LLM Layer ' + llmStatus + '</div>' +
+                      '<p class="settings-section-help">Pick a provider, set the endpoint &amp; model, and provide an API key (literal or env-var name).</p>' +
+                      '<div style="margin:12px 0;">' + providerRadios + '</div>' +
+                      '<div class="settings-row">' +
+                        '<label for="llmEndpoint">Endpoint</label>' +
+                        '<input type="text" id="llmEndpoint" value="' + escapeAttr(form.endpoint) + '" placeholder="' + escapeAttr(provider.defaultEndpoint) + '">' +
+                      '</div>' +
+                      '<div class="settings-row">' +
+                        '<label for="llmModel">Model</label>' +
+                        '<div class="combo' + dropdownOpenClass + '" id="modelCombo">' +
+                          '<input type="text" id="llmModel" autocomplete="off" value="' + escapeAttr(form.model) + '" placeholder="' + escapeAttr(modelPlaceholder) + '">' +
+                          '<button type="button" class="combo-toggle" id="modelComboToggle" aria-label="Show all models">▾</button>' +
+                          '<div class="combo-list">' + modelOptions + '</div>' +
+                        '</div>' +
+                      '</div>' +
+                      '<div class="settings-row">' +
+                        '<label for="llmKey">API Key</label>' +
+                        '<input type="' + keyType + '" id="llmKey" value="' + escapeAttr(form.apiKeyInput) + '" placeholder="' + escapeAttr(apiKey.placeholder) + '"' + (keyDisabled ? ' disabled' : '') + '>' +
+                        (keyDisabled ? '' : '<button type="button" class="settings-btn" id="toggleKeyVisible">' + (form.apiKeyVisible ? 'Hide' : 'Show') + '</button>') +
+                      '</div>' +
+                      '<div class="settings-info">' + apiKey.hint + ' 🔒 Stored in <code>~/.aidex/llm.json</code> (chmod 600). Never echoed back.</div>' +
 
-                  // Privacy switch
-                  '<label class="settings-toggle" style="margin-top:14px;">' +
-                    '<input type="checkbox" id="llmSendCode"' + (llm.sendCode ? ' checked' : '') + '>' +
-                    '<div>' +
-                      '<span class="label-main">Allow code snippets to be sent to the LLM</span>' +
-                      '<span class="label-help">' +
-                        '<strong>Default: OFF.</strong> When off, only your query and metadata (file paths, names) leave the box. ' +
-                        'When on, snippets of method bodies and doc sections are sent during reranking — ' +
-                        'better results, but only for non-confidential projects.' +
-                      '</span>' +
-                    '</div>' +
-                  '</label>' +
-                '</div>' +
+                      // Privacy switch
+                      '<label class="settings-toggle" style="margin-top:14px;">' +
+                        '<input type="checkbox" id="llmSendCode"' + (form.sendCode ? ' checked' : '') + '>' +
+                        '<div>' +
+                          '<span class="label-main">Allow code snippets to be sent to the LLM</span>' +
+                          '<span class="label-help"><strong>Default: OFF.</strong> When off, only your query and metadata (file paths, names) leave the box. When on, snippets of method bodies and doc sections are sent during reranking — better results, but only for non-confidential projects.</span>' +
+                        '</div>' +
+                      '</label>' +
+                    '</div>'
+                  : '') +
 
                 // Actions
                 '<div class="settings-actions">' +
                   '<button type="button" class="settings-btn primary" id="saveSettings"' + (settingsState.saving ? ' disabled' : '') + '>' +
-                    (settingsState.saving ? 'Saving…' : 'Save settings') +
-                  '</button>' +
+                    (settingsState.saving ? 'Saving…' : 'Save settings') + '</button>' +
                   '<button type="button" class="settings-btn" id="testConn"' + (settingsState.testing ? ' disabled' : '') + '>' +
-                    (settingsState.testing ? 'Testing…' : 'Test connection') +
-                  '</button>' +
+                    (settingsState.testing ? 'Testing…' : 'Test connection') + '</button>' +
                 '</div>' +
 
                 (settingsState.feedback
                     ? '<div class="settings-feedback ' + settingsState.feedback.kind + '">' + escapeHtml(settingsState.feedback.text) + '</div>'
                     : '');
 
-            wireSettingsForm();
+            wireForm();
         }
 
-        function wireSettingsForm() {
-            const saveBtn = document.getElementById('saveSettings');
-            if (saveBtn) saveBtn.addEventListener('click', saveSettings);
+        // Compute API-key placeholder + hint as a pure function of:
+        //   - the *currently selected* provider (drives env-var convention)
+        //   - what's stored in the file (literal key vs api_key_env)
+        function computeApiKeyHint(provider, file) {
+            if (!provider.needsKey) {
+                return { placeholder: 'no key needed', hint: 'This provider runs locally and needs no API key.' };
+            }
+            if (file.keyTail) {
+                return {
+                    placeholder: 'sk-...' + file.keyTail + ' (stored)',
+                    hint: 'Stored literal key in <code>~/.aidex/llm.json</code>. Type to replace, leave blank to keep.',
+                };
+            }
+            if (file.keyEnvName) {
+                return {
+                    placeholder: file.keyEnvName + ' (env var, stored)',
+                    hint: 'Reads the key from environment variable <code>' + escapeHtml(file.keyEnvName) + '</code> at runtime. Type to replace.',
+                };
+            }
+            if (provider.envVarName) {
+                return {
+                    placeholder: provider.envVarName + ' (env var) — or paste a literal key',
+                    hint: 'Set <code>' + escapeHtml(provider.envVarName) + '</code> in your environment, or type the var name / a literal key here.',
+                };
+            }
+            return {
+                placeholder: 'API key, or env var name',
+                hint: 'Type a literal key (e.g. <code>sk-proj-...</code>) or just the name of an env var.',
+            };
+        }
 
-            const testBtn = document.getElementById('testConn');
-            if (testBtn) testBtn.addEventListener('click', runConnectionTest);
+        // ============================================================
+        // Wire — attach event listeners. Each handler updates form, calls render().
+        // ============================================================
+        function wireForm() {
+            const form = settingsState.form;
 
+            // --- Embeddings ---
+            // Toggling embeddings shows/hides the LLM sub-toggle and LLM panel,
+            // so we need a full re-render.
+            const embEnabledEl = document.getElementById('embEnabled');
+            if (embEnabledEl) {
+                embEnabledEl.addEventListener('change', () => {
+                    form.enableEmbeddings = embEnabledEl.checked;
+                    render();
+                });
+            }
+            bindSelect('embModel', v => form.embeddingModel = v);
+
+            // LLM master toggle (lives in the embeddings panel) — re-render to
+            // show/hide the LLM section.
+            const llmEnabledEl = document.getElementById('llmEnabled');
+            if (llmEnabledEl) {
+                llmEnabledEl.addEventListener('change', () => {
+                    form.llmEnabled = llmEnabledEl.checked;
+                    render();
+                });
+            }
+
+            // --- Provider radio ---
+            document.querySelectorAll('input[name="provider"]').forEach(r => {
+                r.addEventListener('change', (ev) => {
+                    const newBackend = ev.target.value;
+                    const provider = settingsState.data.llm.providers.find(p => p.backend === newBackend);
+                    if (!provider) return;
+                    form.backend = newBackend;
+                    // Switching provider always resets endpoint + model. Predictable.
+                    form.endpoint = provider.defaultEndpoint;
+                    form.model = '';
+                    form.modelDropdownOpen = false;
+                    render();
+                });
+            });
+
+            // --- Endpoint / model / key inputs ---
+            bindInput('llmEndpoint', v => form.endpoint = v);
+            bindInput('llmModel', v => form.model = v);
+            bindInput('llmKey', v => form.apiKeyInput = v);
+
+            // --- Send-code privacy switch ---
+            bindCheckbox('llmSendCode', v => form.sendCode = v);
+
+            // --- Show/Hide API key ---
             const showBtn = document.getElementById('toggleKeyVisible');
             if (showBtn) {
                 showBtn.addEventListener('click', () => {
-                    const inp = document.getElementById('llmKey');
-                    if (!inp) return;
-                    inp.type = inp.type === 'password' ? 'text' : 'password';
-                    showBtn.textContent = inp.type === 'password' ? 'Show' : 'Hide';
+                    form.apiKeyVisible = !form.apiKeyVisible;
+                    render();
                 });
             }
 
-            // When provider changes, swap suggested model list + suggested endpoint
-            document.querySelectorAll('input[name="provider"]').forEach(r => {
-                r.addEventListener('change', (ev) => {
-                    const backend = ev.target.value;
-                    const provider = settingsState.data.llm.providers.find(p => p.backend === backend);
-                    if (!provider) return;
-                    const datalist = document.getElementById('llmModelList');
-                    if (datalist) {
-                        datalist.innerHTML = provider.suggestedModels
-                            .map(m => '<option value="' + escapeAttr(m) + '">').join('');
-                    }
-                    const modelInput = document.getElementById('llmModel');
-                    if (modelInput) {
-                        modelInput.placeholder = provider.suggestedModels[0] || 'model name';
-                        // Clear value when switching provider unless user already typed something custom.
-                        if (!modelInput.value || isKnownModel(modelInput.value)) {
-                            modelInput.value = '';
-                        }
-                    }
-                    const endpointInput = document.getElementById('llmEndpoint');
-                    if (endpointInput && (!endpointInput.value || isKnownEndpoint(endpointInput.value))) {
-                        endpointInput.value = provider.defaultEndpoint;
-                    }
+            // --- Custom model combobox ---
+            const comboToggle = document.getElementById('modelComboToggle');
+            if (comboToggle) {
+                comboToggle.addEventListener('click', () => {
+                    form.modelDropdownOpen = !form.modelDropdownOpen;
+                    render();
+                });
+            }
+            document.querySelectorAll('#modelCombo .combo-option').forEach(opt => {
+                opt.addEventListener('mousedown', (ev) => {
+                    ev.preventDefault(); // don't lose focus before we read data-value
+                    form.model = opt.getAttribute('data-value') || '';
+                    form.modelDropdownOpen = false;
+                    render();
                 });
             });
+            // Click outside the combo closes it
+            document.addEventListener('mousedown', (ev) => {
+                if (!form.modelDropdownOpen) return;
+                const combo = document.getElementById('modelCombo');
+                if (combo && !combo.contains(ev.target)) {
+                    form.modelDropdownOpen = false;
+                    render();
+                }
+            }, { once: true });
+
+            // --- Action buttons ---
+            const saveBtn = document.getElementById('saveSettings');
+            if (saveBtn) saveBtn.addEventListener('click', save);
+            const testBtn = document.getElementById('testConn');
+            if (testBtn) testBtn.addEventListener('click', testConnection);
         }
 
-        function isKnownEndpoint(url) {
-            const knowns = [
-                'https://api.anthropic.com',
-                'https://api.openai.com/v1',
-                'https://openrouter.ai/api/v1',
-                'http://localhost:11434',
-                'https://api.example.com/v1',
-            ];
-            return knowns.some(k => url.startsWith(k));
+        function bindCheckbox(id, setter) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('change', () => { setter(el.checked); /* no render — checkbox already reflects state */ });
+        }
+        function bindSelect(id, setter) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('change', () => { setter(el.value); });
+        }
+        function bindInput(id, setter) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', () => { setter(el.value); });
         }
 
-        function isKnownModel(name) {
-            // Any name that appears in any provider's suggestion list is "known" — safe to clear.
-            if (!settingsState.data) return false;
-            for (const p of settingsState.data.llm.providers) {
-                if (p.suggestedModels.includes(name)) return true;
-            }
-            return false;
-        }
-
-        function saveSettings() {
-            if (settingsState.saving) return;
-            const enableEmb = document.getElementById('embEnabled').checked;
-            const embModel = document.getElementById('embModel').value;
-            const endpoint = document.getElementById('llmEndpoint').value.trim();
-            const model = document.getElementById('llmModel').value;
-            const keyRaw = document.getElementById('llmKey').value;
-            const sendCode = document.getElementById('llmSendCode').checked;
-
+        // ============================================================
+        // Save / Test — both send the same payload built from form state
+        // ============================================================
+        function buildPayload() {
+            const f = settingsState.form;
             const payload = {
-                enableEmbeddings: enableEmb,
-                embeddingModel: embModel,
-                llmEndpoint: endpoint || null,
-                llmModel: model || null,
-                llmSendCode: sendCode,
+                enableEmbeddings: f.enableEmbeddings,
+                embeddingModel: f.embeddingModel,
+                llmEnabled: f.llmEnabled,
+                llmEndpoint: f.endpoint || null,
+                llmModel: f.model || null,
+                llmSendCode: f.sendCode,
             };
-            // Only send API key if user typed something different from the masked placeholder.
-            if (keyRaw && !/^•+$/.test(keyRaw)) payload.llmApiKey = keyRaw;
+            if (f.apiKeyInput && f.apiKeyInput.trim()) payload.llmApiKey = f.apiKeyInput.trim();
+            return payload;
+        }
 
+        function save() {
+            if (settingsState.saving) return;
             settingsState.saving = true;
             settingsState.feedback = null;
-            renderSettingsForm();
+            render();
             settingsRequestId++;
-            ws.send(JSON.stringify({ type: 'setSettings', payload, requestId: settingsRequestId }));
+            ws.send(JSON.stringify({ type: 'setSettings', payload: buildPayload(), requestId: settingsRequestId }));
         }
 
-        function runConnectionTest() {
+        function testConnection() {
             if (settingsState.testing) return;
             settingsState.testing = true;
+            settingsState.testPending = true;
             settingsState.feedback = null;
-            renderSettingsForm();
+            render();
             settingsRequestId++;
-            ws.send(JSON.stringify({ type: 'testLlmConnection', requestId: settingsRequestId }));
+            ws.send(JSON.stringify({ type: 'setSettings', payload: buildPayload(), requestId: settingsRequestId }));
+            // handleSettingsSaved will fire testLlmConnection when testPending is set
         }
 
         function renderLogView() {

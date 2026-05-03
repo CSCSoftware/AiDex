@@ -26,6 +26,8 @@ export interface LlmCreds {
     model: string;
     /** Diagnostic: where this config came from. */
     source: 'env' | 'guideline' | 'config-file' | 'ollama-default' | 'project';
+    /** Diagnostic: name of the env var when source==='env' or when file uses api_key_env. */
+    envVarName?: string;
 }
 
 const DEFAULT_OLLAMA = 'http://localhost:11434';
@@ -46,13 +48,24 @@ export interface ResolveOptions {
 }
 
 export async function resolveLlmCreds(opts: ResolveOptions = {}): Promise<LlmCreds | null> {
-    // 1) Project-level
+    // Master switch: if the user explicitly turned LLM off, no provider.
+    if (!isLlmEnabled()) return null;
+
+    // 1) Project-level (per-project override in projects.llm_endpoint)
     if (opts.projectPath) {
         const proj = readProjectConfig(opts.projectPath);
         if (proj) return proj;
     }
 
-    // 2) Env vars
+    // 2) ~/.aidex/llm.json — the user explicitly chose this provider in
+    //    the Settings tab. It wins over ENV auto-detect: otherwise picking
+    //    "Anthropic" while OPENAI_API_KEY is set would silently keep using
+    //    OpenAI. If the file has an endpoint but no usable key, fall back
+    //    to the env var that matches THAT backend, then guideline.
+    const fromFile = readConfigFileSmart();
+    if (fromFile) return fromFile;
+
+    // 3) Env vars (auto-detect for first-time users who never opened Settings)
     for (const { env, backend, endpoint, defaultModel } of ENV_KEYS) {
         const key = process.env[env];
         if (key && key.trim()) {
@@ -62,17 +75,14 @@ export async function resolveLlmCreds(opts: ResolveOptions = {}): Promise<LlmCre
                 endpoint,
                 model: process.env.AIDEX_LLM_MODEL || defaultModel,
                 source: 'env',
+                envVarName: env,
             };
         }
     }
 
-    // 3) aidex_global_guideline
+    // 4) aidex_global_guideline
     const fromGuide = readGuideline();
     if (fromGuide) return fromGuide;
-
-    // 4) ~/.aidex/llm.json
-    const fromFile = readConfigFile();
-    if (fromFile) return fromFile;
 
     // 5) Ollama probe
     if (await probeOllama(DEFAULT_OLLAMA)) {
@@ -86,6 +96,68 @@ export async function resolveLlmCreds(opts: ResolveOptions = {}): Promise<LlmCre
     }
 
     return null;
+}
+
+/**
+ * Read config file and resolve key with backend-aware fallback.
+ *
+ * If the file has:
+ *   - api_key (literal) → use it directly
+ *   - api_key_env name → look up that var
+ *   - neither, but has an endpoint → look up the env var conventional for
+ *     this backend (e.g. file says endpoint=anthropic.com → try ANTHROPIC_API_KEY)
+ *
+ * Ollama needs no key. For anything else without a key, return null
+ * so the next resolution stage gets a chance.
+ */
+function readConfigFileSmart(): LlmCreds | null {
+    const data = readLlmConfigFile();
+    if (!data) return null;
+
+    const endpoint = data.endpoint ?? null;
+    if (!endpoint) {
+        // No endpoint stored → file isn't really configured. Fall through.
+        // (A literal api_key alone without endpoint is ambiguous and rare.)
+        if (!data.api_key && !data.api_key_env) return null;
+    }
+
+    const finalEndpoint = endpoint ?? 'https://api.anthropic.com';
+    const backend = inferBackend(finalEndpoint);
+    const model = data.model ?? defaultModelFor(backend);
+
+    if (backend === 'ollama') {
+        return { backend, apiKey: null, endpoint: finalEndpoint, model, source: 'config-file' };
+    }
+
+    // Resolve key: literal api_key wins, then api_key_env, then env var
+    // matching this backend.
+    let apiKey: string | null = null;
+    let envVarName: string | undefined;
+    if (data.api_key && data.api_key.trim()) {
+        apiKey = data.api_key.trim();
+    } else if (data.api_key_env && data.api_key_env.trim()) {
+        envVarName = data.api_key_env.trim();
+        apiKey = process.env[envVarName] ?? null;
+    } else {
+        // No explicit key in file — fall back to the env var conventional
+        // for the chosen backend.
+        const conventional = ENV_KEYS.find(k => k.backend === backend);
+        if (conventional) {
+            envVarName = conventional.env;
+            apiKey = process.env[conventional.env] ?? null;
+        }
+    }
+
+    if (!apiKey) return null; // can't use the file config without a key
+
+    return {
+        backend,
+        apiKey,
+        endpoint: finalEndpoint,
+        model,
+        source: 'config-file',
+        envVarName,
+    };
 }
 
 function readProjectConfig(projectPath: string): LlmCreds | null {
@@ -183,29 +255,6 @@ function readGuidelineKey(key: string): string | null {
     }
 }
 
-function readConfigFile(): LlmCreds | null {
-    const path = join(homedir(), '.aidex', 'llm.json');
-    if (!existsSync(path)) return null;
-    try {
-        const data = JSON.parse(readFileSync(path, 'utf-8')) as {
-            api_key?: string;
-            endpoint?: string;
-            model?: string;
-        };
-        if (!data.api_key) return null;
-        const endpoint = data.endpoint ?? 'https://api.anthropic.com';
-        return {
-            backend: inferBackend(endpoint),
-            apiKey: data.api_key,
-            endpoint,
-            model: data.model ?? defaultModelFor(inferBackend(endpoint)),
-            source: 'config-file',
-        };
-    } catch {
-        return null;
-    }
-}
-
 async function probeOllama(endpoint: string): Promise<boolean> {
     try {
         const ctrl = new AbortController();
@@ -220,9 +269,46 @@ async function probeOllama(endpoint: string): Promise<boolean> {
 
 /** Read the global LLM config file (~/.aidex/llm.json). */
 export interface LlmConfigFile {
+    /** Master switch. If false: LLM layer is disabled, no provider is resolved. */
+    enabled?: boolean;
+    /** A literal API key (e.g. "sk-proj-..."). Mutually exclusive with api_key_env. */
     api_key?: string;
+    /** Name of an environment variable to read the key from (e.g. "OPENAI_API_KEY"). */
+    api_key_env?: string;
     endpoint?: string;
     model?: string;
+}
+
+/**
+ * The "is LLM layer on?" decision.
+ *
+ * Backwards compatibility: existing users have no `enabled` field in their
+ * file. If a key is resolvable (literal, api_key_env, or auto-detected ENV),
+ * we treat them as "on" — so an update doesn't silently turn off LLM for
+ * users who were already using it. New installs without any config end up
+ * "off" by default.
+ */
+export function isLlmEnabled(): boolean {
+    const data = readLlmConfigFile();
+    if (data && typeof data.enabled === 'boolean') return data.enabled;
+    // Legacy: infer from presence of resolvable key.
+    if (data) {
+        if (data.api_key && data.api_key.trim()) return true;
+        if (data.api_key_env && process.env[data.api_key_env]) return true;
+    }
+    // Auto-detect ENV
+    for (const { env } of ENV_KEYS) {
+        if (process.env[env] && process.env[env]!.trim()) return true;
+    }
+    return false;
+}
+
+/** Pattern for valid env-var names: uppercase letter start, then [A-Z0-9_]. */
+export const ENV_VAR_NAME_RE = /^[A-Z][A-Z0-9_]*$/;
+
+/** Detect whether a user-typed string looks like an env-var name vs. a real key. */
+export function isEnvVarName(input: string): boolean {
+    return ENV_VAR_NAME_RE.test(input.trim()) && input.trim().length <= 64;
 }
 
 export function llmConfigPath(): string {
@@ -244,9 +330,14 @@ export function writeLlmConfigFile(cfg: LlmConfigFile): void {
     const dir = join(homedir(), '.aidex');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-    // Strip empty values so we don't persist nulls.
+    // api_key and api_key_env are mutually exclusive — last write wins.
     const clean: LlmConfigFile = {};
-    if (cfg.api_key && cfg.api_key.trim()) clean.api_key = cfg.api_key.trim();
+    if (typeof cfg.enabled === 'boolean') clean.enabled = cfg.enabled;
+    if (cfg.api_key && cfg.api_key.trim()) {
+        clean.api_key = cfg.api_key.trim();
+    } else if (cfg.api_key_env && cfg.api_key_env.trim()) {
+        clean.api_key_env = cfg.api_key_env.trim();
+    }
     if (cfg.endpoint && cfg.endpoint.trim()) clean.endpoint = cfg.endpoint.trim();
     if (cfg.model && cfg.model.trim()) clean.model = cfg.model.trim();
 

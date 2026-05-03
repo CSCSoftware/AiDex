@@ -77,6 +77,9 @@ export interface LlmModule {
 
     /** Rerank retrieval candidates. Returns identity order if no backend. */
     rerank(query: string, candidates: RerankCandidate[], ctx: LlmContext): Promise<RerankResult>;
+
+    /** Invalidate any cached creds — call after Settings save. */
+    invalidate(): void;
 }
 
 // ============================================================
@@ -97,6 +100,7 @@ function createStub(): LlmModule {
         async rerank(_query, candidates, _ctx) {
             return { orderedIds: candidates.map(c => c.id), invoked: false };
         },
+        invalidate() { /* no-op */ },
     };
 }
 
@@ -143,6 +147,10 @@ export function getLlm(): LlmModule {
         rerank: async (q, c, ctx) => {
             await ensureUpgraded();
             return getOrInit().rerank(q, c, ctx);
+        },
+        invalidate: () => {
+            // Sync method — don't await upgrade. If real instance exists, invalidate it.
+            if (_instance) _instance.invalidate();
         },
     };
 }

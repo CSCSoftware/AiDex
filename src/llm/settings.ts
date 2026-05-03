@@ -18,7 +18,10 @@ import Database from 'better-sqlite3';
 import { PRODUCT_VERSION } from '../constants.js';
 import {
     type LlmBackend,
+    type LlmConfigFile,
     type LlmCreds,
+    isEnvVarName,
+    isLlmEnabled,
     llmConfigPath,
     readLlmConfigFile,
     resolveLlmCreds,
@@ -46,6 +49,8 @@ export interface ProviderOption {
     suggestedModels: string[];
     /** Does this provider need an API key? Ollama doesn't. */
     needsKey: boolean;
+    /** Conventional env-var name for this provider's key (used as placeholder hint). */
+    envVarName?: string;
 }
 
 export const PROVIDER_OPTIONS: ProviderOption[] = [
@@ -55,6 +60,7 @@ export const PROVIDER_OPTIONS: ProviderOption[] = [
         defaultEndpoint: 'https://api.anthropic.com',
         suggestedModels: ['claude-haiku-4-5', 'claude-sonnet-4-6', 'claude-opus-4-7'],
         needsKey: true,
+        envVarName: 'ANTHROPIC_API_KEY',
     },
     {
         backend: 'openai',
@@ -62,6 +68,7 @@ export const PROVIDER_OPTIONS: ProviderOption[] = [
         defaultEndpoint: 'https://api.openai.com/v1',
         suggestedModels: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'],
         needsKey: true,
+        envVarName: 'OPENAI_API_KEY',
     },
     {
         backend: 'openrouter',
@@ -69,6 +76,7 @@ export const PROVIDER_OPTIONS: ProviderOption[] = [
         defaultEndpoint: 'https://openrouter.ai/api/v1',
         suggestedModels: ['anthropic/claude-3-5-haiku', 'openai/gpt-4o-mini', 'meta-llama/llama-3.1-8b-instruct'],
         needsKey: true,
+        envVarName: 'OPENROUTER_API_KEY',
     },
     {
         backend: 'ollama',
@@ -90,6 +98,7 @@ export const PROVIDER_OPTIONS: ProviderOption[] = [
             'deepseek-ai/DeepSeek-V3',
         ],
         needsKey: true,
+        envVarName: 'HF_TOKEN',
     },
     {
         backend: 'custom',
@@ -116,19 +125,27 @@ export interface EmbeddingsSettings {
 }
 
 export interface LlmSettings {
-    /** Currently active resolved config (or null if none works). */
+    /** Master switch — when false, LLM layer is off regardless of keys. */
+    enabled: boolean;
+    /** Currently active resolved config (or null if disabled / none works). */
     active: {
         backend: LlmBackend;
         endpoint: string;
         model: string;
         source: string;
         hasKey: boolean;
+        /** When source==='env', the name of the env var. */
+        envVarName?: string;
     } | null;
     /** What's stored in ~/.aidex/llm.json (user-controlled). */
     file: {
         endpoint: string | null;
         model: string | null;
         hasKey: boolean;
+        /** Last 4 chars of a literal stored key, for masked display ("sk-...abc4"). */
+        keyTail: string | null;
+        /** If the file points at an env var instead of a literal key. */
+        keyEnvName: string | null;
     };
     /** Per-project privacy switch. */
     sendCode: boolean;
@@ -176,6 +193,7 @@ export async function getSettings(projectPath: string): Promise<ProjectSettings>
             })),
         },
         llm: {
+            enabled: isLlmEnabled(),
             active: creds
                 ? {
                       backend: creds.backend,
@@ -183,12 +201,17 @@ export async function getSettings(projectPath: string): Promise<ProjectSettings>
                       model: creds.model,
                       source: creds.source,
                       hasKey: !!creds.apiKey || creds.backend === 'ollama',
+                      ...(creds.envVarName ? { envVarName: creds.envVarName } : {}),
                   }
                 : null,
             file: {
                 endpoint: file.endpoint ?? null,
                 model: file.model ?? null,
-                hasKey: !!file.api_key,
+                hasKey: !!(file.api_key || file.api_key_env),
+                keyTail: file.api_key && file.api_key.length >= 4
+                    ? file.api_key.slice(-4)
+                    : null,
+                keyEnvName: file.api_key_env ?? null,
             },
             sendCode,
             providers: PROVIDER_OPTIONS,
@@ -205,10 +228,66 @@ export async function getSettings(projectPath: string): Promise<ProjectSettings>
 export interface SetSettingsPayload {
     enableEmbeddings?: boolean;
     embeddingModel?: string;
+    /** Master switch for the LLM layer. When false, no provider is resolved. */
+    llmEnabled?: boolean;
     llmEndpoint?: string | null;
     llmModel?: string | null;
     llmApiKey?: string | null;
     llmSendCode?: boolean;
+}
+
+const MAX_STRING_LEN = 2048;
+const MAX_API_KEY_LEN = 8192;
+const MAX_MODEL_LEN = 256;
+
+/**
+ * Coerce an untrusted payload (e.g. from a WebSocket client) into a
+ * SetSettingsPayload. Unknown keys are dropped, oversized strings rejected.
+ * Throws Error with a user-readable message on invalid input.
+ */
+export function validateSetSettingsPayload(raw: unknown): SetSettingsPayload {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error('Settings payload must be an object');
+    }
+    const src = raw as Record<string, unknown>;
+    const out: SetSettingsPayload = {};
+
+    const checkStr = (key: string, val: unknown, max: number): string | null => {
+        if (val === null) return null;
+        if (typeof val !== 'string') throw new Error(`${key} must be a string or null`);
+        if (val.length > max) throw new Error(`${key} exceeds max length ${max}`);
+        return val;
+    };
+
+    if ('enableEmbeddings' in src) {
+        if (typeof src.enableEmbeddings !== 'boolean') throw new Error('enableEmbeddings must be boolean');
+        out.enableEmbeddings = src.enableEmbeddings;
+    }
+    if ('embeddingModel' in src && src.embeddingModel !== undefined) {
+        if (typeof src.embeddingModel !== 'string') throw new Error('embeddingModel must be a string');
+        if (src.embeddingModel.length > MAX_MODEL_LEN) throw new Error(`embeddingModel exceeds max length ${MAX_MODEL_LEN}`);
+        out.embeddingModel = src.embeddingModel;
+    }
+    if ('llmEndpoint' in src) {
+        out.llmEndpoint = checkStr('llmEndpoint', src.llmEndpoint, MAX_STRING_LEN);
+    }
+    if ('llmModel' in src) {
+        const v = checkStr('llmModel', src.llmModel, MAX_MODEL_LEN);
+        out.llmModel = v;
+    }
+    if ('llmApiKey' in src) {
+        out.llmApiKey = checkStr('llmApiKey', src.llmApiKey, MAX_API_KEY_LEN);
+    }
+    if ('llmSendCode' in src) {
+        if (typeof src.llmSendCode !== 'boolean') throw new Error('llmSendCode must be boolean');
+        out.llmSendCode = src.llmSendCode;
+    }
+    if ('llmEnabled' in src) {
+        if (typeof src.llmEnabled !== 'boolean') throw new Error('llmEnabled must be boolean');
+        out.llmEnabled = src.llmEnabled;
+    }
+
+    return out;
 }
 
 export interface SetSettingsResult {
@@ -226,12 +305,16 @@ export async function setSettings(
     try {
         // 1. Update LLM config file (~/.aidex/llm.json) — only fields explicitly given.
         if (
+            payload.llmEnabled !== undefined ||
             payload.llmEndpoint !== undefined ||
             payload.llmModel !== undefined ||
             payload.llmApiKey !== undefined
         ) {
             const current = readLlmConfigFile() ?? {};
             const next = { ...current };
+            if (payload.llmEnabled !== undefined) {
+                next.enabled = payload.llmEnabled;
+            }
             if (payload.llmEndpoint !== undefined) {
                 if (payload.llmEndpoint) next.endpoint = payload.llmEndpoint;
                 else delete next.endpoint;
@@ -241,10 +324,36 @@ export async function setSettings(
                 else delete next.model;
             }
             if (payload.llmApiKey !== undefined) {
-                if (payload.llmApiKey) next.api_key = payload.llmApiKey;
-                else delete next.api_key;
+                // api_key and api_key_env are mutually exclusive — clear both first.
+                delete next.api_key;
+                delete next.api_key_env;
+                const trimmed = payload.llmApiKey?.trim() ?? '';
+                if (trimmed) {
+                    if (isEnvVarName(trimmed)) {
+                        next.api_key_env = trimmed;
+                    } else {
+                        next.api_key = trimmed;
+                    }
+                }
             }
+
+            // Validate ONLY when LLM layer is on. Off means the user wants no
+            // provider resolved at all — no key required.
+            if (next.enabled !== false) {
+                const validation = validateLlmConfigKey(next);
+                if (!validation.ok) {
+                    return { success: false, error: validation.error };
+                }
+            }
+
             writeLlmConfigFile(next);
+
+            // Invalidate the LLM module's cred cache so the next call sees
+            // the new config without waiting for the 5s TTL.
+            try {
+                const { getLlm } = await import('./index.js');
+                getLlm().invalidate();
+            } catch { /* non-fatal */ }
         }
 
         // 2. Per-project send_code (and optional endpoint/model overrides).
@@ -287,8 +396,41 @@ export interface TestConnectionResult {
 }
 
 export async function testLlmConnection(projectPath: string): Promise<TestConnectionResult> {
-    const creds = await resolveLlmCreds({ projectPath });
+    // Test the *user's chosen* backend strictly — i.e. the one stored in
+    // ~/.aidex/llm.json. resolveLlmCreds() has fallbacks (ENV auto-detect,
+    // Ollama probe) which would silently switch to a different provider —
+    // that's wrong for an explicit Test button. If the file says Anthropic
+    // but no Anthropic key is resolvable, return a clear error rather than
+    // testing OpenAI behind the user's back.
+    const file = readLlmConfigFile();
+
+    if (file && file.enabled === false) {
+        return {
+            ok: false, backend: null, model: null, latencyMs: null,
+            error: 'LLM Layer is disabled. Enable it in Settings to run a connection test.',
+        };
+    }
+
+    const creds = file
+        ? buildCredsFromFile(file)
+        : await resolveLlmCreds({ projectPath });
+
     if (!creds) {
+        if (file && file.endpoint) {
+            // File chose a backend but no key resolves — explain why.
+            const backend = inferBackendFromEndpoint(file.endpoint);
+            const conventional = expectedEnvVarFor(backend);
+            const hint = conventional
+                ? ` Set ${conventional} or paste a key into the API Key field.`
+                : '';
+            return {
+                ok: false,
+                backend,
+                model: file.model ?? null,
+                latencyMs: null,
+                error: `No API key found for ${backend}.${hint}`,
+            };
+        }
         return {
             ok: false,
             backend: null,
@@ -322,6 +464,104 @@ export async function testLlmConnection(projectPath: string): Promise<TestConnec
             error: err instanceof Error ? err.message : String(err),
         };
     }
+}
+
+/** Infer backend purely from an endpoint URL (no DB, no env). */
+function inferBackendFromEndpoint(endpoint: string): LlmBackend {
+    const e = endpoint.toLowerCase();
+    if (e.includes('anthropic.com')) return 'anthropic';
+    if (e.includes('openai.com')) return 'openai';
+    if (e.includes('openrouter')) return 'openrouter';
+    if (e.includes('huggingface.co')) return 'huggingface';
+    if (/^https?:\/\/(localhost|127\.|192\.168\.|10\.|::1)/.test(endpoint)) return 'ollama';
+    return 'custom';
+}
+
+function expectedEnvVarFor(backend: LlmBackend): string | null {
+    const map: Record<string, string> = {
+        anthropic: 'ANTHROPIC_API_KEY',
+        openai: 'OPENAI_API_KEY',
+        openrouter: 'OPENROUTER_API_KEY',
+        huggingface: 'HF_TOKEN',
+    };
+    return map[backend] ?? null;
+}
+
+/**
+ * Build LlmCreds strictly from the file content, following the same key-
+ * resolution chain as readConfigFileSmart but without falling back to a
+ * different backend.
+ */
+function buildCredsFromFile(file: LlmConfigFile): LlmCreds | null {
+    if (!file.endpoint && !file.api_key && !file.api_key_env) return null;
+    const endpoint = file.endpoint ?? 'https://api.anthropic.com';
+    const backend = inferBackendFromEndpoint(endpoint);
+    const model = file.model ?? defaultModelForBackend(backend);
+
+    if (backend === 'ollama') {
+        return { backend, apiKey: null, endpoint, model, source: 'config-file' };
+    }
+
+    let apiKey: string | null = null;
+    let envVarName: string | undefined;
+    if (file.api_key && file.api_key.trim()) {
+        apiKey = file.api_key.trim();
+    } else if (file.api_key_env && file.api_key_env.trim()) {
+        envVarName = file.api_key_env.trim();
+        apiKey = process.env[envVarName] ?? null;
+    } else {
+        envVarName = expectedEnvVarFor(backend) ?? undefined;
+        if (envVarName) apiKey = process.env[envVarName] ?? null;
+    }
+
+    if (!apiKey) return null;
+    return { backend, apiKey, endpoint, model, source: 'config-file', envVarName };
+}
+
+function defaultModelForBackend(b: LlmBackend): string {
+    const provider = PROVIDER_OPTIONS.find(p => p.backend === b);
+    return provider?.suggestedModels[0] ?? 'gpt-4o-mini';
+}
+
+/**
+ * Validate that a llm.json config has a usable key for its backend.
+ * Returns ok:false if the user picked a paid backend without a key
+ * resolvable (literal in file, env-var in file, or conventional ENV var).
+ */
+function validateLlmConfigKey(file: LlmConfigFile): { ok: true } | { ok: false; error: string } {
+    if (!file.endpoint && !file.api_key && !file.api_key_env) return { ok: true }; // empty = nothing to validate
+    const endpoint = file.endpoint ?? 'https://api.anthropic.com';
+    const backend = inferBackendFromEndpoint(endpoint);
+
+    // Ollama / local backends don't need a key.
+    if (backend === 'ollama') return { ok: true };
+
+    // Literal key always wins.
+    if (file.api_key && file.api_key.trim()) return { ok: true };
+
+    // api_key_env: must resolve to a non-empty value.
+    if (file.api_key_env && file.api_key_env.trim()) {
+        const v = process.env[file.api_key_env.trim()];
+        if (v && v.trim()) return { ok: true };
+        return {
+            ok: false,
+            error: `Environment variable ${file.api_key_env} is not set or empty. Set it, or paste a literal key.`,
+        };
+    }
+
+    // No explicit file key — check the conventional ENV var for this backend.
+    const conventional = expectedEnvVarFor(backend);
+    if (conventional && process.env[conventional] && process.env[conventional]!.trim()) {
+        return { ok: true };
+    }
+
+    const hint = conventional
+        ? ` Set ${conventional} in your environment, or paste a literal key into the API Key field.`
+        : ' Paste a literal key into the API Key field.';
+    return {
+        ok: false,
+        error: `No API key for ${backend}.${hint}`,
+    };
 }
 
 // ============================================================
