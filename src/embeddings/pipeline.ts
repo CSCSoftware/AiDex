@@ -13,7 +13,7 @@ import { chunkMarkdown } from './chunker-docs.js';
 import { chunkNote, chunkTask, chunkTaskLog } from './chunker-workspace.js';
 import { createEmbedder, type Embedder } from './embedder.js';
 import { DEFAULT_MODEL_ID, getModel } from './model-registry.js';
-import { runSearch } from './search.js';
+import { runSearch, runSearchWithTelemetry } from './search.js';
 import {
     bulkUpsertEmbeddings,
     bumpFilesChanged,
@@ -758,6 +758,11 @@ class RealEmbeddings implements EmbeddingsModule {
         // is implicit because vec0 select queries auto-load via the singleton.
         // But vec0 needs to have been created at least once — done at enable().
         return runSearch(opts);
+    }
+
+    async searchWithTelemetry(opts: SearchOptions) {
+        this.ensureSchema();
+        return runSearchWithTelemetry(opts);
     }
 
     async status(projectPath?: string): Promise<EmbeddingStatus> {

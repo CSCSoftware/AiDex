@@ -2896,7 +2896,7 @@ async function handleSearch(args: Record<string, unknown>): Promise<{ content: A
         const { getEmbeddings } = await import('../embeddings/index.js');
         const e = getEmbeddings();
 
-        const hits = await e.search({
+        const { hits, telemetry } = await e.searchWithTelemetry({
             query,
             scope: args.scope as 'current' | 'all' | 'linked' | undefined,
             path: args.path as string | undefined,
@@ -2905,16 +2905,33 @@ async function handleSearch(args: Record<string, unknown>): Promise<{ content: A
             sourceTypes: args.source_types as Array<'method' | 'type' | 'doc-section' | 'task' | 'note' | 'note-history' | 'task-log'> | undefined,
             mode: args.mode as 'semantic' | 'hybrid' | 'exact' | undefined,
             k: typeof args.k === 'number' ? args.k : undefined,
+            llm: args.llm as 'auto' | 'off' | 'translate' | 'rerank' | 'expand+rerank' | undefined,
         });
 
+        const llmTags: string[] = [];
+        if (telemetry.translateRan) llmTags.push(telemetry.translateFailed ? 'translate ✗' : 'translate ✓');
+        if (telemetry.expandRan) llmTags.push(telemetry.expandFailed ? 'expand ✗' : 'expand ✓');
+        if (telemetry.rerankRan) llmTags.push(telemetry.rerankFailed ? 'rerank ✗' : 'rerank ✓');
+        const llmLine = llmTags.length > 0 ? `LLM: ${llmTags.join(', ')}` : null;
+        const errLine = telemetry.lastError ? `LLM error: ${telemetry.lastError}` : null;
+        const showRewrites = telemetry.queriesUsed.length > 1
+            ? `Rewrites: ${telemetry.queriesUsed.map(q => `"${q}"`).join(', ')}`
+            : null;
+
         if (hits.length === 0) {
-            return { content: [{ type: 'text', text: 'No matches.' }] };
+            const parts = ['No matches.'];
+            if (llmLine) parts.push(llmLine);
+            if (errLine) parts.push(errLine);
+            return { content: [{ type: 'text', text: parts.join('\n') }] };
         }
 
         const lines: string[] = [];
         const showProject = (args.scope === 'all' || args.scope === 'linked');
         lines.push(`# Search results (${hits.length})`);
         lines.push(`Query: "${query}"  ·  Mode: ${args.mode ?? 'hybrid'}`);
+        if (llmLine) lines.push(llmLine);
+        if (showRewrites) lines.push(showRewrites);
+        if (errLine) lines.push(errLine);
         lines.push('');
         for (const h of hits) {
             const loc = h.sourcePath ? `${h.sourcePath}:${h.sourceLine ?? ''}` : '(workspace)';

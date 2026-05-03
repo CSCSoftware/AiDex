@@ -86,6 +86,28 @@ export interface SearchHit {
     rank: number;
 }
 
+/**
+ * Side-channel info about which LLM stages ran during a search and whether
+ * they succeeded. Useful for the user/AI to know if translate/rerank actually
+ * fired or silently fell back to embeddings-only.
+ */
+export interface SearchTelemetry {
+    translateRan: boolean;
+    translateFailed: boolean;
+    expandRan: boolean;
+    expandFailed: boolean;
+    rerankRan: boolean;
+    rerankFailed: boolean;
+    queriesUsed: string[];
+    /** Optional human-readable error from the last LLM failure. */
+    lastError?: string;
+}
+
+export interface SearchResultWithTelemetry {
+    hits: SearchHit[];
+    telemetry: SearchTelemetry;
+}
+
 export interface EmbeddingStatus {
     moduleLoaded: boolean;
     modelId: string | null;
@@ -135,6 +157,9 @@ export interface EmbeddingsModule {
 
     /** Search embeddings. */
     search(opts: SearchOptions): Promise<SearchHit[]>;
+
+    /** Search and return telemetry about which LLM stages fired. */
+    searchWithTelemetry(opts: SearchOptions): Promise<SearchResultWithTelemetry>;
 
     /** Status overview. */
     status(projectPath?: string): Promise<EmbeddingStatus>;
@@ -201,6 +226,11 @@ function createStub(): EmbeddingsModule {
             const real = await loadRealModule();
             _instance = real;
             return real.search(opts);
+        },
+        async searchWithTelemetry(opts) {
+            const real = await loadRealModule();
+            _instance = real;
+            return real.searchWithTelemetry(opts);
         },
         async status() {
             return {
@@ -280,6 +310,7 @@ export function getEmbeddings(): EmbeddingsModule {
         onTaskChanged: (projectPath, taskId) => getOrInit().onTaskChanged(projectPath, taskId),
         onNoteChanged: (projectPath, noteId) => getOrInit().onNoteChanged(projectPath, noteId),
         search: (opts) => getOrInit().search(opts),
+        searchWithTelemetry: (opts) => getOrInit().searchWithTelemetry(opts),
         status: (projectPath) => getOrInit().status(projectPath),
         migrate: (opts) => getOrInit().migrate(opts),
     };

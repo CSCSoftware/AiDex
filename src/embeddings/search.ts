@@ -17,7 +17,9 @@ import type {
     LlmStrategy,
     SearchHit,
     SearchOptions,
+    SearchResultWithTelemetry,
     SearchScope,
+    SearchTelemetry,
     SourceKind,
     SourceType,
 } from './index.js';
@@ -61,19 +63,37 @@ async function getQueryEmbedder(modelId: string): Promise<Embedder> {
 }
 
 export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
+    const r = await runSearchWithTelemetry(opts);
+    return r.hits;
+}
+
+function newTelemetry(): SearchTelemetry {
+    return {
+        translateRan: false,
+        translateFailed: false,
+        expandRan: false,
+        expandFailed: false,
+        rerankRan: false,
+        rerankFailed: false,
+        queriesUsed: [],
+    };
+}
+
+export async function runSearchWithTelemetry(opts: SearchOptions): Promise<SearchResultWithTelemetry> {
     const k = opts.k ?? 20;
     const mode = opts.mode ?? 'hybrid';
     const path = opts.path ? normalizePath(opts.path) : undefined;
     const scope = opts.scope ?? (path ? 'current' : 'all');
     const llmStrategy: LlmStrategy = opts.llm ?? 'auto';
+    const telemetry = newTelemetry();
 
     const db = _searchDbAccessor();
 
     const projects = resolveProjects(db, scope, path, opts.projectFilter);
-    if (projects.length === 0) return [];
+    if (projects.length === 0) return { hits: [], telemetry };
 
     const modelId = projects[0].embedding_model_id;
-    if (!modelId) return [];
+    if (!modelId) return { hits: [], telemetry };
 
     const dim = projects[0].embedding_dim as number;
     const projectIds = projects.map(p => p.id);
@@ -83,7 +103,8 @@ export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
     // ============================================================
     // LLM stage 1: query rewriting (translate / expand)
     // ============================================================
-    const queries = await rewriteQuery(opts.query, llmStrategy, path);
+    const queries = await rewriteQuery(opts.query, llmStrategy, path, telemetry);
+    telemetry.queriesUsed = queries;
 
     // ============================================================
     // Retrieval — run against each subquery and merge by RRF.
@@ -100,8 +121,8 @@ export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
     let semantic: SearchHit[] = mergeBatchesRRF(semBatches);
 
     if (mode === 'semantic') {
-        // No exact-match fusion. Optionally rerank.
-        return await maybeRerank(semantic.slice(0, k), opts, llmStrategy, path);
+        const hits = await maybeRerank(semantic.slice(0, k), opts, llmStrategy, path, telemetry);
+        return { hits, telemetry };
     }
 
     // Exact side runs against the original query (exact match in any
@@ -109,12 +130,14 @@ export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
     const exact = runExactAcrossProjects(projects, opts, candidateLimit);
 
     if (mode === 'exact') {
-        return await maybeRerank(exact.slice(0, k), opts, llmStrategy, path);
+        const hits = await maybeRerank(exact.slice(0, k), opts, llmStrategy, path, telemetry);
+        return { hits, telemetry };
     }
 
     // Hybrid: RRF fusion of semantic + exact.
     const fused = fuseRRF(semantic, exact, k);
-    return await maybeRerank(fused, opts, llmStrategy, path);
+    const hits = await maybeRerank(fused, opts, llmStrategy, path, telemetry);
+    return { hits, telemetry };
 }
 
 // ============================================================
@@ -124,21 +147,44 @@ export async function runSearch(opts: SearchOptions): Promise<SearchHit[]> {
 async function rewriteQuery(
     original: string,
     strategy: LlmStrategy,
-    projectPath: string | undefined
+    projectPath: string | undefined,
+    telemetry: SearchTelemetry
 ): Promise<string[]> {
     if (strategy === 'off' || strategy === 'rerank') return [original];
 
     const llm = getLlm();
+    // Don't claim a stage "ran" when no backend is wired up. The stub
+    // module returns invoked:false silently, but the telemetry must reflect
+    // that no LLM call actually went out.
+    const status = await llm.status();
+    if (!status.available) return [original];
+
     const ctx = { projectPath: projectPath ?? '', sendCode: false }; // query-only stage — code never sent
 
     if (strategy === 'expand+rerank') {
-        const r = await llm.expand(original, ctx);
-        return r.queries.length > 0 ? r.queries : [original];
+        try {
+            const r = await llm.expand(original, ctx);
+            telemetry.expandRan = !!r.invoked;
+            return r.queries.length > 0 ? r.queries : [original];
+        } catch (err) {
+            telemetry.expandRan = true;
+            telemetry.expandFailed = true;
+            telemetry.lastError = err instanceof Error ? err.message : String(err);
+            return [original];
+        }
     }
 
     if (strategy === 'translate' || strategy === 'auto') {
-        const r = await llm.translate(original, ctx);
-        return r.queries.length > 0 ? r.queries : [original];
+        try {
+            const r = await llm.translate(original, ctx);
+            telemetry.translateRan = !!r.invoked;
+            return r.queries.length > 0 ? r.queries : [original];
+        } catch (err) {
+            telemetry.translateRan = true;
+            telemetry.translateFailed = true;
+            telemetry.lastError = err instanceof Error ? err.message : String(err);
+            return [original];
+        }
     }
 
     return [original];
@@ -148,7 +194,8 @@ async function maybeRerank(
     hits: SearchHit[],
     opts: SearchOptions,
     strategy: LlmStrategy,
-    projectPath: string | undefined
+    projectPath: string | undefined,
+    telemetry: SearchTelemetry
 ): Promise<SearchHit[]> {
     if (hits.length === 0) return hits;
     if (strategy === 'off' || strategy === 'translate') return hits;
@@ -171,7 +218,15 @@ async function maybeRerank(
         sourceLine: h.sourceLine,
         sourceText: h.sourceText,
     }));
-    const r = await llm.rerank(opts.query, candidates, ctx);
+    telemetry.rerankRan = true;
+    let r;
+    try {
+        r = await llm.rerank(opts.query, candidates, ctx);
+    } catch (err) {
+        telemetry.rerankFailed = true;
+        telemetry.lastError = err instanceof Error ? err.message : String(err);
+        return hits;
+    }
     if (!r.invoked) return hits;
 
     const byId = new Map(candidates.map((c, i) => [c.id, hits[i]]));
