@@ -15,6 +15,24 @@ import { DEFAULT_EXCLUDE, readGitignore, shortHash } from './init.js';
 import { validateIndex, noIndexError, withDatabase, withProjectDb } from './shared.js';
 import { invalidateGlobalCache } from './global/global-query.js';
 
+async function notifyEmbeddingsFileUpdated(projectPath: string, filePath: string): Promise<void> {
+    try {
+        const { getEmbeddings } = await import('../embeddings/index.js');
+        await getEmbeddings().updateFile(projectPath, filePath);
+    } catch {
+        // Embeddings are best-effort; never break aidex_update.
+    }
+}
+
+async function notifyEmbeddingsFileRemoved(projectPath: string, filePath: string): Promise<void> {
+    try {
+        const { getEmbeddings } = await import('../embeddings/index.js');
+        await getEmbeddings().removeFile(projectPath, filePath);
+    } catch {
+        // Embeddings are best-effort; never break aidex_remove.
+    }
+}
+
 // ============================================================
 // Types
 // ============================================================
@@ -98,6 +116,8 @@ export function update(params: UpdateParams): UpdateResult {
 
     return withDatabase(dbPath, false, (db, queries) => {
         try {
+            const storeBodies = db.getMetadata('store_bodies') === '1';
+
             // Check if file is already indexed
             const existingFile = queries.getFileByPath(relativePath);
 
@@ -243,7 +263,7 @@ export function update(params: UpdateParams): UpdateResult {
                 }
                 newItemCount = itemsInserted.size;
 
-                // Insert methods
+                // Insert methods (with optional body storage)
                 for (const method of extraction.methods) {
                     queries.insertMethod(
                         fileId,
@@ -252,7 +272,10 @@ export function update(params: UpdateParams): UpdateResult {
                         method.lineNumber,
                         method.visibility,
                         method.isStatic,
-                        method.isAsync
+                        method.isAsync,
+                        storeBodies ? method.bodyText : null,
+                        storeBodies ? method.bodyLines : null,
+                        storeBodies ? method.bodyTruncated : false
                     );
                 }
 
@@ -272,6 +295,9 @@ export function update(params: UpdateParams): UpdateResult {
 
             // Invalidate global query cache so next search sees fresh data
             invalidateGlobalCache();
+
+            // Fire-and-forget: refresh embeddings for this file (no-op if not enabled).
+            void notifyEmbeddingsFileUpdated(params.path, relativePath);
 
             return {
                 success: true,
@@ -339,6 +365,9 @@ export function remove(params: RemoveParams): RemoveResult {
                     queries.deleteFile(existingFile.id);
                     queries.deleteUnusedItems();
                 });
+
+                // Fire-and-forget: drop embeddings for this file (no-op if not enabled).
+                void notifyEmbeddingsFileRemoved(projectPath, relativePath);
 
                 return {
                     success: true,

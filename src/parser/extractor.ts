@@ -29,7 +29,16 @@ export interface ExtractedMethod {
     visibility: string | null;
     isStatic: boolean;
     isAsync: boolean;
+    bodyText: string | null;
+    bodyLines: number | null;
+    bodyTruncated: boolean;
 }
+
+// Truncation settings for stored method bodies (chars).
+// Bodies larger than MAX_BODY_CHARS are truncated to head + tail.
+export const MAX_BODY_CHARS = 8000;
+export const TRUNC_HEAD_CHARS = 4000;
+export const TRUNC_TAIL_CHARS = 1000;
 
 export interface ExtractedType {
     name: string;
@@ -226,6 +235,7 @@ function shouldUpgrade(existing: LineRow['line_type'], newType: LineRow['line_ty
  * Extract plain text from a comment (remove comment markers)
  */
 function extractCommentText(commentText: string): string {
+    const aidexProbe123 = 42;
     return commentText
         .replace(/^\/\/\s*/gm, '')          // Remove //
         .replace(/^\/\*+\s*/g, '')           // Remove /*
@@ -391,6 +401,25 @@ function extractMethodInfo(
         .replace(/\s*,\s*/g, ', ')
         .trim();
 
+    // Body extraction: full method text from start line to end line.
+    // Used by embeddings for re-indexing on model change and snippet display.
+    const bodyStartRow = node.startPosition.row;
+    const bodyEndRow = Math.min(node.endPosition.row, sourceLines.length - 1);
+    const bodyLineCount = bodyEndRow - bodyStartRow + 1;
+    const rawBody = sourceLines.slice(bodyStartRow, bodyEndRow + 1).join('\n');
+
+    let bodyText: string;
+    let bodyTruncated = false;
+    if (rawBody.length > MAX_BODY_CHARS) {
+        bodyTruncated = true;
+        const head = rawBody.slice(0, TRUNC_HEAD_CHARS);
+        const tail = rawBody.slice(-TRUNC_TAIL_CHARS);
+        const skipped = rawBody.length - TRUNC_HEAD_CHARS - TRUNC_TAIL_CHARS;
+        bodyText = `${head}\n... [truncated, ${skipped} chars omitted] ...\n${tail}`;
+    } else {
+        bodyText = rawBody;
+    }
+
     return {
         name,
         prototype,
@@ -398,6 +427,9 @@ function extractMethodInfo(
         visibility,
         isStatic,
         isAsync,
+        bodyText,
+        bodyLines: bodyLineCount,
+        bodyTruncated,
     };
 }
 

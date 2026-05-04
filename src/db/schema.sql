@@ -1,6 +1,6 @@
 -- ============================================================
 -- AiDex SQLite Schema
--- Version: 1.0
+-- Version: 1.1
 -- ============================================================
 
 PRAGMA foreign_keys = ON;
@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS methods (
     visibility TEXT,
     is_static INTEGER DEFAULT 0,
     is_async INTEGER DEFAULT 0,
+    body_text TEXT,
+    body_lines INTEGER,
+    body_truncated INTEGER DEFAULT 0,
     FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
 );
 

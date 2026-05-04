@@ -140,13 +140,20 @@ export class GlobalDatabase {
     }
 
     /**
-     * Remove a project from the registry
+     * Remove a project from the registry. Tries the path exactly as given,
+     * then falls back to the normalised form — covers legacy entries that
+     * were stored with raw backslashes before path normalisation was applied
+     * at insert time.
      */
     unregisterProject(path: string): boolean {
-        const result = this.db.prepare(
-            'DELETE FROM projects WHERE path = ?'
-        ).run(normalizePath(path));
-        return result.changes > 0;
+        const norm = normalizePath(path);
+        const exact = this.db.prepare('DELETE FROM projects WHERE path = ?').run(path);
+        if (exact.changes > 0) return true;
+        if (norm !== path) {
+            const normRes = this.db.prepare('DELETE FROM projects WHERE path = ?').run(norm);
+            return normRes.changes > 0;
+        }
+        return false;
     }
 
     /**

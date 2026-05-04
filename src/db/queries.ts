@@ -55,6 +55,9 @@ export interface MethodRow {
     visibility: string | null;
     is_static: number;
     is_async: number;
+    body_text: string | null;
+    body_lines: number | null;
+    body_truncated: number;
 }
 
 export interface TypeRow {
@@ -368,12 +371,19 @@ export class Queries {
         lineNumber: number,
         visibility: string | null = null,
         isStatic = false,
-        isAsync = false
+        isAsync = false,
+        bodyText: string | null = null,
+        bodyLines: number | null = null,
+        bodyTruncated = false
     ): number {
         this._insertMethod ??= this.db.prepare(
-            'INSERT INTO methods (file_id, name, prototype, line_number, visibility, is_static, is_async) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO methods (file_id, name, prototype, line_number, visibility, is_static, is_async, body_text, body_lines, body_truncated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        const result = this._insertMethod.run(fileId, name, prototype, lineNumber, visibility, isStatic ? 1 : 0, isAsync ? 1 : 0);
+        const result = this._insertMethod.run(
+            fileId, name, prototype, lineNumber,
+            visibility, isStatic ? 1 : 0, isAsync ? 1 : 0,
+            bodyText, bodyLines, bodyTruncated ? 1 : 0
+        );
         return result.lastInsertRowid as number;
     }
 

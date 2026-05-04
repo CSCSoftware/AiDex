@@ -20,6 +20,7 @@ export function shortHash(content: Buffer | string): string {
 
 import { createDatabase, createQueries, type AiDexDatabase, type Queries } from '../db/index.js';
 import { extract, getSupportedExtensions } from '../parser/index.js';
+import { globalDbExists, readProjectStats, openGlobalDatabase } from '../db/global-database.js';
 
 // ============================================================
 // Types
@@ -31,6 +32,12 @@ export interface InitParams {
     languages?: string[];
     exclude?: string[];
     fresh?: boolean;  // Force fresh re-index (delete all existing data)
+    store_bodies?: boolean;  // Store full method bodies in DB (vorbereitend für Embeddings)
+    embeddings?: boolean;    // Implies store_bodies=true (Embeddings brauchen Bodies)
+    // LLM-layer config (v1.25). Persisted per project in global.db.
+    llm_endpoint?: string;
+    llm_model?: string;
+    llm_send_code?: boolean;
 }
 
 export interface InitResult {
@@ -44,6 +51,12 @@ export interface InitResult {
     typesFound: number;
     durationMs: number;
     errors: string[];
+    embeddings?: {
+        embedded: number;
+        skipped: number;
+        removed: number;
+        durationMs: number;
+    };
 }
 
 // ============================================================
@@ -227,6 +240,16 @@ export async function init(params: InitParams): Promise<InitResult> {
     const db = createDatabase(dbPath, projectName, params.path, incremental);
     const queries = createQueries(db);
 
+    // Determine store_bodies setting (precedence: explicit param > embeddings flag > metadata > default false)
+    const storedFlag = db.getMetadata('store_bodies');
+    const storeBodies =
+        params.store_bodies === true || params.embeddings === true
+            ? true
+            : params.store_bodies === false
+                ? false
+                : storedFlag === '1';
+    db.setMetadata('store_bodies', storeBodies ? '1' : '0');
+
     // Build glob pattern for supported files
     const extensions = getSupportedExtensions();
     const patterns = extensions.map(ext => `**/*${ext}`);
@@ -261,7 +284,7 @@ export async function init(params: InitParams): Promise<InitResult> {
     db.transaction(() => {
         for (const filePath of files) {
             try {
-                const result = indexFile(params.path, filePath, db, queries, incremental);
+                const result = indexFile(params.path, filePath, db, queries, incremental, storeBodies);
                 if (result.skipped) {
                     filesSkipped++;
                 } else if (result.success) {
@@ -368,6 +391,43 @@ export async function init(params: InitParams): Promise<InitResult> {
     // Invalidate global query cache so next search sees fresh data
     invalidateGlobalCache();
 
+    // Optional: build/refresh embeddings for this project.
+    // Failures here must not break the init result — embeddings are opt-in.
+    let embeddingsResult: InitResult['embeddings'];
+    if (params.embeddings === true) {
+        try {
+            const { getEmbeddings } = await import('../embeddings/index.js');
+            const e = getEmbeddings();
+            await e.enable(params.path);
+            const r = await e.indexProject(params.path);
+            embeddingsResult = {
+                embedded: r.embedded,
+                skipped: r.skipped,
+                removed: r.removed,
+                durationMs: r.durationMs,
+            };
+        } catch (err) {
+            errors.push(
+                `Embeddings: ${err instanceof Error ? err.message : String(err)}`
+            );
+        }
+    }
+
+    // Optional: persist LLM-layer configuration on the project row.
+    if (
+        params.llm_endpoint !== undefined ||
+        params.llm_model !== undefined ||
+        params.llm_send_code !== undefined
+    ) {
+        try {
+            await persistLlmConfig(params.path, params);
+        } catch (err) {
+            errors.push(
+                `LLM config: ${err instanceof Error ? err.message : String(err)}`
+            );
+        }
+    }
+
     return {
         success: true,
         indexPath: indexDir,
@@ -379,6 +439,7 @@ export async function init(params: InitParams): Promise<InitResult> {
         typesFound: totalTypes,
         durationMs: Date.now() - startTime,
         errors,
+        embeddings: embeddingsResult,
     };
 }
 
@@ -400,7 +461,8 @@ function indexFile(
     relativePath: string,
     db: AiDexDatabase,
     queries: Queries,
-    incremental: boolean = false
+    incremental: boolean = false,
+    storeBodies: boolean = false
 ): IndexFileResult {
     const absolutePath = join(projectPath, relativePath);
 
@@ -493,7 +555,7 @@ function indexFile(
         itemsInserted.add(item.term);
     }
 
-    // Insert methods
+    // Insert methods (with optional body storage)
     for (const method of extraction.methods) {
         queries.insertMethod(
             fileId,
@@ -502,7 +564,10 @@ function indexFile(
             method.lineNumber,
             method.visibility,
             method.isStatic,
-            method.isAsync
+            method.isAsync,
+            storeBodies ? method.bodyText : null,
+            storeBodies ? method.bodyLines : null,
+            storeBodies ? method.bodyTruncated : false
         );
     }
 
@@ -529,11 +594,53 @@ function indexFile(
 // ============================================================
 
 /**
+ * Persist llm_endpoint / llm_model / llm_send_code on the project row in global.db.
+ * Ensures the embedding-layer schema migration ran first so the columns exist.
+ */
+async function persistLlmConfig(
+    projectPath: string,
+    params: InitParams
+): Promise<void> {
+    const { ensureEmbeddingsSchema } = await import('../embeddings/store.js');
+    ensureEmbeddingsSchema();
+
+    const { openGlobalDatabase, globalDbExists } = await import('../db/global-database.js');
+    if (!globalDbExists()) return;
+
+    const gdb = openGlobalDatabase();
+    try {
+        const db = gdb.getDb();
+        // Make sure the project is registered first (might be a fresh init).
+        const exists = db.prepare('SELECT id FROM projects WHERE path = ?').get(projectPath);
+        if (!exists) return; // tryUpdateGlobalRegistry handles registration; nothing to update yet
+
+        const sets: string[] = [];
+        const vals: unknown[] = [];
+        if (params.llm_endpoint !== undefined) {
+            sets.push('llm_endpoint = ?');
+            vals.push(params.llm_endpoint || null);
+        }
+        if (params.llm_model !== undefined) {
+            sets.push('llm_model = ?');
+            vals.push(params.llm_model || null);
+        }
+        if (params.llm_send_code !== undefined) {
+            sets.push('llm_send_code = ?');
+            vals.push(params.llm_send_code ? 1 : 0);
+        }
+        if (sets.length === 0) return;
+        vals.push(projectPath);
+        db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE path = ?`).run(...vals);
+    } finally {
+        gdb.close();
+    }
+}
+
+/**
  * Update global registry after init/update. Fire-and-forget — errors are silently ignored.
  */
 function tryUpdateGlobalRegistry(projectPath: string, counts: { files: number; items: number; methods: number; types: number }): void {
     try {
-        const { globalDbExists, readProjectStats, openGlobalDatabase } = require('../db/global-database.js');
         if (!globalDbExists()) return;
 
         const stats = readProjectStats(projectPath);

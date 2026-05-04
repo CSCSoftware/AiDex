@@ -9,6 +9,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { INDEX_DIR } from '../../constants.js';
 import { readProjectStats } from '../../db/global-database.js';
+import { normalizePath } from '../shared.js';
 import { withGlobalDb, EMPTY_TOTALS } from './global-shared.js';
 
 // ============================================================
@@ -56,16 +57,43 @@ export function globalRefresh(params: GlobalRefreshParams): GlobalRefreshResult 
 
             // Filter to specific project if requested
             if (params.project) {
-                const normalizedFilter = params.project.replace(/\\/g, '/');
+                const normalizedFilter = normalizePath(params.project);
                 projects = projects.filter(p =>
                     p.name === params.project ||
-                    p.path === normalizedFilter
+                    normalizePath(p.path) === normalizedFilter
                 );
             }
 
             let updated = 0;
             let removed = 0;
             const removedPaths: string[] = [];
+
+            // First pass: dedupe entries that differ only in path separators
+            // (e.g. "Q:/develop/Aidex" and "Q:\develop\Aidex" registered as
+            // separate rows due to a historical normalisation gap). We keep
+            // the entry with stats and drop the empty duplicate.
+            const seen = new Map<string, typeof projects[number]>();
+            const dropped: string[] = [];
+            for (const p of projects) {
+                const key = normalizePath(p.path).toLowerCase();
+                const prev = seen.get(key);
+                if (!prev) {
+                    seen.set(key, p);
+                    continue;
+                }
+                // Prefer the one with more files indexed; on tie, prefer
+                // forward-slash form.
+                const prevHasData = (prev.files_count ?? 0) > 0;
+                const currHasData = (p.files_count ?? 0) > 0;
+                const winner = currHasData && !prevHasData ? p : prev;
+                const loser = winner === p ? prev : p;
+                seen.set(key, winner);
+                if (loser.path !== winner.path) {
+                    globalDb.unregisterProject(loser.path);
+                    dropped.push(loser.path);
+                }
+            }
+            projects = [...seen.values()];
 
             for (const project of projects) {
                 const dbPath = join(project.path, INDEX_DIR, 'index.db');
@@ -78,12 +106,21 @@ export function globalRefresh(params: GlobalRefreshParams): GlobalRefreshResult 
                     continue;
                 }
 
-                // Read fresh stats and update
+                // Read fresh stats and update — registerProject already
+                // normalises the path, so re-registering an entry that was
+                // stored with backslashes will overwrite it under the canonical
+                // forward-slash form.
                 const stats = readProjectStats(project.path);
                 if (stats) {
                     globalDb.registerProject(project.path, project.name, stats);
                     updated++;
                 }
+            }
+
+            // Surface any deduplicated paths so the user sees the cleanup.
+            for (const d of dropped) {
+                removedPaths.push(d);
+                removed++;
             }
 
             const totals = globalDb.getTotals();

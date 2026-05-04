@@ -35,6 +35,26 @@ export function registerTools(): Tool[] {
                         items: { type: 'string' },
                         description: 'Additional glob patterns to exclude (e.g., ["**/test/**"])',
                     },
+                    store_bodies: {
+                        type: 'boolean',
+                        description: 'Store full method bodies in DB. Required for embeddings. ~10-20 MB extra per project. Persisted across runs.',
+                    },
+                    embeddings: {
+                        type: 'boolean',
+                        description: 'Enable embeddings for this project (implies store_bodies=true). Builds semantic search vectors using jina-code by default.',
+                    },
+                    llm_endpoint: {
+                        type: 'string',
+                        description: 'LLM provider endpoint URL (https://api.anthropic.com / https://api.openai.com/v1 / https://openrouter.ai/api/v1 / http://localhost:11434 for Ollama). Persisted per project.',
+                    },
+                    llm_model: {
+                        type: 'string',
+                        description: 'LLM model name for the chosen endpoint (e.g. "claude-haiku-4-5", "gpt-4o-mini", "llama3.1:8b"). Persisted per project.',
+                    },
+                    llm_send_code: {
+                        type: 'boolean',
+                        description: 'PRIVACY SWITCH. If true, code snippets and doc bodies may be sent to the LLM during reranking. If false (default), only paths, names, and the user query are sent. Set true only for non-sensitive projects.',
+                    },
                 },
                 required: ['path'],
             },
@@ -474,11 +494,11 @@ export function registerTools(): Tool[] {
                     },
                     due: {
                         type: 'string',
-                        description: 'Due date: ISO date ("2026-04-10") or relative from now ("3d", "1w", "12h"). Set to "" to clear.',
+                        description: 'Due date: ISO date ("2026-04-10") or relative from now ("30s", "12h", "3d", "1w"). Set to "" to clear.',
                     },
                     interval: {
                         type: 'string',
-                        description: 'Repeat interval after trigger: "30m", "2h", "3d", "1w". Omit or "" for one-shot.',
+                        description: 'Repeat interval after trigger: "30s", "30m", "2h", "3d", "1w". Omit or "" for one-shot.',
                     },
                     task_action: {
                         type: 'string',
@@ -835,6 +855,76 @@ export function registerTools(): Tool[] {
                 required: ['action'],
             },
         },
+        {
+            name: `${TOOL_PREFIX}settings`,
+            description: `Open the AiDex Settings tab in the viewer (where the user configures embeddings, LLM provider/key/model, and the privacy switch). Use this when the user asks to "open my AiDex settings", "show my LLM configuration", "configure embeddings", etc. Without 'open: true' the tool returns the current settings as JSON for inspection.`,
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    path: {
+                        type: 'string',
+                        description: `Path to project with ${INDEX_DIR} directory (defaults to current working directory if omitted on the server).`,
+                    },
+                    open: {
+                        type: 'boolean',
+                        description: 'If true, open the viewer (if not already running) and switch to the Settings tab.',
+                    },
+                },
+                required: ['path'],
+            },
+        },
+        {
+            name: `${TOOL_PREFIX}search`,
+            description: `Semantic search across embedded code, docs, and workspace items (tasks/notes/history). Best for natural-language questions like "how do we handle retry with backoff" or "what does the error logging do" — finds the right file even when you don't know the identifier name. Requires \`embeddings: true\` on aidex_init for the project. Three modes: semantic (pure vector KNN), exact (identifier match like aidex_query), hybrid (RRF fusion of both — default and recommended).`,
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    query: {
+                        type: 'string',
+                        description: 'The search query — natural language for semantic, or a term for exact mode',
+                    },
+                    path: {
+                        type: 'string',
+                        description: 'Project path. Required for scope:"current" (default when path is set).',
+                    },
+                    scope: {
+                        type: 'string',
+                        enum: ['current', 'all', 'linked'],
+                        description: 'current: only this project (default if path set). all: every project that has embeddings enabled. linked: this project + its linked dependencies.',
+                    },
+                    project_filter: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Glob patterns over project paths (e.g. ["Q:/develop/**"]). Combined with scope.',
+                    },
+                    source_kinds: {
+                        type: 'array',
+                        items: { type: 'string', enum: ['code', 'docs', 'workspace'] },
+                        description: 'Filter by content kind. Default: all kinds.',
+                    },
+                    source_types: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Filter by source_type: method, type, doc-section, task, task-log, note, note-history.',
+                    },
+                    mode: {
+                        type: 'string',
+                        enum: ['semantic', 'hybrid', 'exact'],
+                        description: 'semantic: pure vector KNN. exact: identifier match (like aidex_query). hybrid: both fused via RRF (default).',
+                    },
+                    k: {
+                        type: 'number',
+                        description: 'Number of results to return (default: 20)',
+                    },
+                    llm: {
+                        type: 'string',
+                        enum: ['auto', 'off', 'translate', 'rerank', 'expand+rerank'],
+                        description: 'LLM-layer strategy. "auto" (default): translate non-English queries + rerank if a key is configured. "off": pure embeddings. "translate": just rewrite the query. "rerank": embeddings then LLM-reranking. "expand+rerank": split into 2-4 subqueries + LLM rerank. Per-project privacy switch llm_send_code controls whether code/snippets are sent.',
+                    },
+                },
+                required: ['query'],
+            },
+        },
     ];
 }
 
@@ -854,7 +944,7 @@ export async function handleToolCall(
                 return handleQuery(args);
 
             case `${TOOL_PREFIX}status`:
-                return handleStatus(args);
+                return await handleStatus(args);
 
             case `${TOOL_PREFIX}signature`:
                 return handleSignature(args);
@@ -934,6 +1024,12 @@ export async function handleToolCall(
             case `${TOOL_PREFIX}log`:
                 return await handleLog(args);
 
+            case `${TOOL_PREFIX}search`:
+                return await handleSearch(args);
+
+            case `${TOOL_PREFIX}settings`:
+                return await handleSettings(args);
+
             default:
                 return {
                     content: [
@@ -971,6 +1067,11 @@ async function handleInit(args: Record<string, unknown>): Promise<{ content: Arr
         path,
         name: args.name as string | undefined,
         exclude: args.exclude as string[] | undefined,
+        store_bodies: args.store_bodies as boolean | undefined,
+        embeddings: args.embeddings as boolean | undefined,
+        llm_endpoint: args.llm_endpoint as string | undefined,
+        llm_model: args.llm_model as string | undefined,
+        llm_send_code: args.llm_send_code as boolean | undefined,
     });
 
     if (result.success) {
@@ -988,6 +1089,14 @@ async function handleInit(args: Record<string, unknown>): Promise<{ content: Arr
         message += `Methods found: ${result.methodsFound}\n`;
         message += `Types found: ${result.typesFound}\n`;
         message += `Duration: ${result.durationMs}ms`;
+
+        if (result.embeddings) {
+            const e = result.embeddings;
+            message += `\n\nEmbeddings: ${e.embedded} embedded`;
+            if (e.skipped > 0) message += `, ${e.skipped} unchanged (skipped)`;
+            if (e.removed > 0) message += `, ${e.removed} pruned`;
+            message += ` in ${e.durationMs}ms`;
+        }
 
         if (result.errors.length > 0) {
             message += `\n\nWarnings (${result.errors.length}):\n`;
@@ -1074,7 +1183,7 @@ function handleQuery(args: Record<string, unknown>): { content: Array<{ type: st
 /**
  * Handle status
  */
-function handleStatus(args: Record<string, unknown>): { content: Array<{ type: string; text: string }> } {
+async function handleStatus(args: Record<string, unknown>): Promise<{ content: Array<{ type: string; text: string }> }> {
     const path = args.path as string | undefined;
 
     if (!path) {
@@ -1114,6 +1223,40 @@ function handleStatus(args: Record<string, unknown>): { content: Array<{ type: s
     const schemaVersion = db.getMetadata('schema_version') ?? 'Unknown';
     db.close();
 
+    // Best-effort: include embeddings breakdown if the global DB exists
+    // and this project has embeddings enabled. Failures are silently ignored —
+    // status must always succeed even when the embeddings module is unavailable.
+    let embeddings: {
+        enabled: boolean;
+        modelId?: string;
+        dim?: number;
+        total?: number;
+        byKind?: Record<string, number>;
+        byType?: Record<string, number>;
+    } = { enabled: false };
+    try {
+        const { isProjectEnabled, getProjectInfo, getProjectEmbeddingBreakdown, ensureEmbeddingsSchema } = await import(
+            '../embeddings/store.js'
+        );
+        ensureEmbeddingsSchema();
+        if (isProjectEnabled(path)) {
+            const info = getProjectInfo(path);
+            if (info) {
+                const breakdown = getProjectEmbeddingBreakdown(info.id);
+                embeddings = {
+                    enabled: true,
+                    modelId: info.modelId,
+                    dim: info.dim,
+                    total: breakdown.total,
+                    byKind: breakdown.byKind,
+                    byType: breakdown.byType,
+                };
+            }
+        }
+    } catch {
+        // module unavailable or DB error → leave embeddings as { enabled: false }
+    }
+
     return {
         content: [
             {
@@ -1122,6 +1265,7 @@ function handleStatus(args: Record<string, unknown>): { content: Array<{ type: s
                     project: projectName,
                     schemaVersion,
                     statistics: stats,
+                    embeddings,
                     databasePath: dbPath,
                 }, null, 2),
             },
@@ -1655,8 +1799,12 @@ function handleFiles(args: Record<string, unknown>): { content: Array<{ type: st
     }
 
     if (result.files.length === 0) {
+        const since = args.modified_since as string | undefined;
+        const msg = since
+            ? `No files modified since ${since}.\n\nNote: \`modified_since\` checks when each file was last (re-)indexed, not when it was last edited. Files whose content is unchanged keep their old \`last_indexed\` timestamp. Run \`aidex_update\` after editing, or \`aidex_init\` to refresh the whole project.`
+            : 'No files found in project.';
         return {
-            content: [{ type: 'text', text: 'No files found in project.' }],
+            content: [{ type: 'text', text: msg }],
         };
     }
 
@@ -1775,11 +1923,10 @@ function handleNote(args: Record<string, unknown>): { content: Array<{ type: str
 
             const lines = entries.map(e => {
                 const date = new Date(e.created_at).toISOString().replace('T', ' ').slice(0, 19);
+                const preview = e.note.length > 200 ? e.note.slice(0, 200) + '…' : e.note;
                 if (e.summary) {
-                    return `--- ${date} ---\n📋 ${e.summary}`;
+                    return `--- ${date} ---\n📋 ${e.summary}\n\n${preview}`;
                 }
-                // Fallback: show first 200 chars of each note, with separator
-                const preview = e.note.length > 200 ? e.note.slice(0, 200) + '...' : e.note;
                 return `--- ${date} ---\n${preview}`;
             });
 
@@ -1822,6 +1969,11 @@ function handleSession(args: Record<string, unknown>): { content: Array<{ type: 
     }
 
     let message = '';
+
+    // Update banner — shown at the top once per version bump.
+    if (result.embeddings?.updateBanner) {
+        message += `> ${result.embeddings.updateBanner}\n\n`;
+    }
 
     // Session status
     if (result.isNewSession) {
@@ -1868,6 +2020,15 @@ function handleSession(args: Record<string, unknown>): { content: Array<{ type: 
     if (result.note) {
         message += '## 📝 Session Note\n';
         message += result.note + '\n';
+    }
+
+    // Embeddings status (only if enabled and has something to say)
+    if (result.embeddings?.enabled) {
+        const e = result.embeddings;
+        const healthIcon = e.health === 'fresh' ? '🟢' : e.health === 'drifting' ? '🟡' : '🔴';
+        message += `\n## 🧠 Embeddings\n`;
+        message += `${healthIcon} ${e.totalEmbeddings} vectors · ${e.modelId} · ${e.health}\n`;
+        if (e.hint) message += `_${e.hint}_\n`;
     }
 
     // Task Scheduler
@@ -2657,5 +2818,138 @@ async function handleLog(args: Record<string, unknown>): Promise<{ content: Arra
 
         default:
             return { content: [{ type: 'text', text: `Unknown action: ${action}` }] };
+    }
+}
+
+/**
+ * Handle aidex_settings — open Settings tab in viewer or report current config.
+ */
+async function handleSettings(args: Record<string, unknown>): Promise<{ content: Array<{ type: string; text: string }> }> {
+    const path = args.path as string;
+    if (!path) {
+        return { content: [{ type: 'text', text: 'Error: path parameter is required' }] };
+    }
+    const open = args.open === true;
+
+    try {
+        const { getSettings, markVersionSeen } = await import('../llm/settings.js');
+        const s = await getSettings(path);
+
+        if (open) {
+            // Start viewer if not running, with the Settings tab pre-selected via URL hash.
+            await startViewer(path, 'settings');
+            // Mark the current version as seen so the update banner stops showing.
+            markVersionSeen();
+
+            // Always queue a focus-tab message — works for fresh start, replay
+            // on first WS connect, or live broadcast if the browser is already there.
+            const { broadcastFocusTab } = await import('../viewer/server.js');
+            broadcastFocusTab('settings');
+
+            const lines: string[] = [];
+            lines.push('✓ Opening AiDex Settings in the viewer (http://localhost:3333).');
+            lines.push('');
+            lines.push('Current configuration:');
+            lines.push(`  Embeddings: ${s.embeddings.enabled ? 'enabled' : 'disabled'}` +
+                (s.embeddings.totalEmbeddings ? ` (${s.embeddings.totalEmbeddings} vectors)` : ''));
+            lines.push(`  LLM: ${s.llm.active
+                ? `${s.llm.active.backend} / ${s.llm.active.model} (${s.llm.active.source})`
+                : 'no backend configured'}`);
+            lines.push(`  Privacy (llm_send_code): ${s.llm.sendCode ? 'on (snippets sent)' : 'off (metadata only)'}`);
+            lines.push('');
+            lines.push('Use the Settings tab to change provider, key, model, and privacy.');
+            return { content: [{ type: 'text', text: lines.join('\n') }] };
+        }
+
+        // Read-only mode: return JSON-ish summary.
+        const lines: string[] = [];
+        lines.push(`# Settings — ${path}`);
+        lines.push('');
+        lines.push(`**Embeddings:** ${s.embeddings.enabled ? `enabled (${s.embeddings.totalEmbeddings} vectors, model: ${s.embeddings.modelId})` : 'disabled'}`);
+        lines.push(`**Model cached on disk:** ${s.embeddings.modelCached ? 'yes' : 'no'}`);
+        lines.push('');
+        lines.push(`**LLM active:** ${s.llm.active ? `${s.llm.active.backend} / ${s.llm.active.model} (source: ${s.llm.active.source})` : '(none)'}`);
+        lines.push(`**LLM file (~/.aidex/llm.json):** ${s.llm.file.hasKey ? 'has key' : 'no key'}` +
+            (s.llm.file.endpoint ? `, endpoint: ${s.llm.file.endpoint}` : '') +
+            (s.llm.file.model ? `, model: ${s.llm.file.model}` : ''));
+        lines.push(`**Privacy switch (llm_send_code):** ${s.llm.sendCode ? '🔓 ON (code snippets are sent to LLM)' : '🔒 OFF (only metadata sent)'}`);
+        lines.push('');
+        lines.push(`**AiDex version:** ${s.currentVersion}` + (s.lastSeenVersion ? ` (last seen: ${s.lastSeenVersion})` : ' (first session)'));
+        lines.push('');
+        lines.push('To open the Settings UI: `aidex_settings({ path: "...", open: true })`');
+        return { content: [{ type: 'text', text: lines.join('\n') }] };
+    } catch (err) {
+        return { content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : String(err)}` }] };
+    }
+}
+
+/**
+ * Handle aidex_search — semantic / exact / hybrid search across embeddings.
+ */
+async function handleSearch(args: Record<string, unknown>): Promise<{ content: Array<{ type: string; text: string }> }> {
+    const query = args.query as string;
+    if (!query) {
+        return { content: [{ type: 'text', text: 'Error: query parameter is required' }] };
+    }
+
+    try {
+        const { getEmbeddings } = await import('../embeddings/index.js');
+        const e = getEmbeddings();
+
+        const { hits, telemetry } = await e.searchWithTelemetry({
+            query,
+            scope: args.scope as 'current' | 'all' | 'linked' | undefined,
+            path: args.path as string | undefined,
+            projectFilter: args.project_filter as string[] | undefined,
+            sourceKinds: args.source_kinds as Array<'code' | 'docs' | 'workspace'> | undefined,
+            sourceTypes: args.source_types as Array<'method' | 'type' | 'doc-section' | 'task' | 'note' | 'note-history' | 'task-log'> | undefined,
+            mode: args.mode as 'semantic' | 'hybrid' | 'exact' | undefined,
+            k: typeof args.k === 'number' ? args.k : undefined,
+            llm: args.llm as 'auto' | 'off' | 'translate' | 'rerank' | 'expand+rerank' | undefined,
+        });
+
+        const llmTags: string[] = [];
+        if (telemetry.translateRan) llmTags.push(telemetry.translateFailed ? 'translate ✗' : 'translate ✓');
+        if (telemetry.expandRan) llmTags.push(telemetry.expandFailed ? 'expand ✗' : 'expand ✓');
+        if (telemetry.rerankRan) llmTags.push(telemetry.rerankFailed ? 'rerank ✗' : 'rerank ✓');
+        const llmLine = llmTags.length > 0 ? `LLM: ${llmTags.join(', ')}` : null;
+        const errLine = telemetry.lastError ? `LLM error: ${telemetry.lastError}` : null;
+        const showRewrites = telemetry.queriesUsed.length > 1
+            ? `Rewrites: ${telemetry.queriesUsed.map(q => `"${q}"`).join(', ')}`
+            : null;
+
+        if (hits.length === 0) {
+            const parts = ['No matches.'];
+            if (llmLine) parts.push(llmLine);
+            if (errLine) parts.push(errLine);
+            return { content: [{ type: 'text', text: parts.join('\n') }] };
+        }
+
+        const lines: string[] = [];
+        const showProject = (args.scope === 'all' || args.scope === 'linked');
+        lines.push(`# Search results (${hits.length})`);
+        lines.push(`Query: "${query}"  ·  Mode: ${args.mode ?? 'hybrid'}`);
+        if (llmLine) lines.push(llmLine);
+        if (showRewrites) lines.push(showRewrites);
+        if (errLine) lines.push(errLine);
+        lines.push('');
+        for (const h of hits) {
+            const loc = h.sourcePath ? `${h.sourcePath}:${h.sourceLine ?? ''}` : '(workspace)';
+            const head = `${h.rank}. [${h.sourceKind}/${h.sourceType}] ${h.sourceName ?? h.sourceAnchor ?? '(unnamed)'}`;
+            const proj = showProject ? `  ·  ${h.projectName}` : '';
+            const dist = h.distance > 0 ? `  ·  d=${h.distance.toFixed(3)}` : '';
+            lines.push(`${head}${proj}${dist}`);
+            lines.push(`   ${loc}`);
+            if (h.sourceText) {
+                const snippet = h.sourceText.replace(/\n/g, ' ').slice(0, 180);
+                lines.push(`   ${snippet}${h.sourceText.length > 180 ? '…' : ''}`);
+            }
+            lines.push('');
+        }
+
+        return { content: [{ type: 'text', text: lines.join('\n').trimEnd() }] };
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text', text: `Error: ${msg}` }] };
     }
 }

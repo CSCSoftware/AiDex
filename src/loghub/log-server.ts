@@ -18,6 +18,8 @@ import type { LogEntry, LogLevel, LogConfig, LogStats, LogHttpEntry } from './lo
 
 const VALID_LEVELS = new Set<string>(['debug', 'info', 'warn', 'error']);
 const BODY_LIMIT = '64kb';
+const VIEWER_PORT = 3333;
+const BIND_HOST = '127.0.0.1';
 
 let logServer: Server | null = null;
 let logBuffer: LogBuffer | null = null;
@@ -46,12 +48,19 @@ export function initLogHub(config: LogConfig): Promise<string> {
     const app = express();
     app.use(express.json({ limit: BODY_LIMIT }));
 
-    // CORS
-    app.use((_req, res, next) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
+    // CORS — only allow localhost (Viewer + curl from same machine)
+    const ALLOWED_ORIGINS = new Set([
+        `http://localhost:${VIEWER_PORT}`,
+        `http://127.0.0.1:${VIEWER_PORT}`,
+    ]);
+    app.use((req, res, next) => {
+        const origin = req.headers.origin;
+        if (origin && ALLOWED_ORIGINS.has(origin)) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        }
         res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        if (_req.method === 'OPTIONS') {
+        if (req.method === 'OPTIONS') {
             res.status(204).end();
             return;
         }
@@ -108,8 +117,8 @@ export function initLogHub(config: LogConfig): Promise<string> {
             }
         });
 
-        logServer.listen(config.port, () => {
-            console.error(`[LogHub] Server started on port ${config.port} (buffer: ${config.bufferSize})`);
+        logServer.listen(config.port, BIND_HOST, () => {
+            console.error(`[LogHub] Server started on ${BIND_HOST}:${config.port} (buffer: ${config.bufferSize})`);
             resolve(`Log Hub started on port ${config.port} (buffer: ${config.bufferSize} entries)`);
         });
     });

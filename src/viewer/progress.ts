@@ -42,7 +42,6 @@ export function startProgress(title: string): void {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
-        res.setHeader('Access-Control-Allow-Origin', '*');
         res.flushHeaders();
 
         sseClients.add(res);
@@ -53,7 +52,7 @@ export function startProgress(title: string): void {
     });
 
     progressServer = createServer(app);
-    progressServer.listen(PROGRESS_PORT, () => {
+    progressServer.listen(PROGRESS_PORT, '127.0.0.1', () => {
         const url = `http://localhost:${PROGRESS_PORT}`;
         console.error(`[Progress] Server started at ${url}`);
 
