@@ -2,7 +2,11 @@
 
 All notable changes to AiDex will be documented in this file.
 
-## [Unreleased]
+## [2.0.0] - 2026-05-04
+
+**Major release** — AiDex grew a brain. Semantic search across code, docs, and workspace items via locally-run embeddings (jina-code, 768d). Optional LLM layer for multilingual queries and reranking. New Settings tab in the Viewer. Schema migrated to v1.2 (additive — existing indexes keep working).
+
+19 commits, ~8400 lines. Restore points: tag `v1.18.0-pre-bugsweep` (clean v1.18.0 working tree) and `v2.0-pre-cleanup` (mid-branch checkpoint).
 
 ### Added
 - **Method body storage** (v1.19a, prerequisite for embeddings): `aidex_init` accepts `store_bodies` (or `embeddings`) flag. When enabled, full method bodies are stored in `methods.body_text` for snippet display and re-embedding. Bodies >8000 chars are truncated to head + tail. Setting persists in `metadata` so `aidex_update` continues to store bodies on incremental updates. Schema migrated to v1.1 (additive, backward compatible).

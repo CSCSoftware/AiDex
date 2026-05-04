@@ -6,34 +6,49 @@
 [![MCP Server](https://img.shields.io/badge/MCP-Server-blue.svg)](https://modelcontextprotocol.io/)
 [![GitHub Discussions](https://img.shields.io/github/discussions/CSCSoftware/AiDex?label=Discussions&logo=github)](https://github.com/CSCSoftware/AiDex/discussions)
 
-**Stop wasting 80% of your AI's context window on code searches.**
+**The persistent brain for AI coding agents.**
 
-AiDex is an MCP server that gives AI coding assistants instant access to your entire codebase through a persistent, pre-built index. Works with any MCP-compatible AI assistant: Claude Code, Claude Desktop, Cursor, Windsurf, Gemini CLI, VS Code Copilot, and more.
+AiDex is an MCP server that gives AI coding assistants a memory, semantic search, and live telemetry — local-first, model-agnostic. Works with any MCP-compatible AI assistant: Claude Code, Claude Desktop, Cursor, Windsurf, Gemini CLI, VS Code Copilot, and more.
+
+### Three Pillars
+
+🧠 **Memory** — Tasks, notes, and session-notes survive every chat. Auto-logged history, scheduled tasks, cross-session continuity. Your AI knows tomorrow what mattered today.
+
+🔍 **Search** — Three modes: `exact` (identifier), `semantic` (concept), `hybrid` (RRF fusion of both). Embeds code, docs, and workspace items into one ranking. Cross-project — every repo in one query. Optional LLM layer translates non-English queries and reranks results.
+
+🌐 **Telemetry** — LogHub receives live logs from any app via HTTP (no SDK). The AI watches what your code actually does, not just what it says. Live-streamed in the Viewer.
+
+<details>
+<summary><strong>And yes — it's still 50× more token-efficient than grep.</strong></summary>
 
 ![AiDex Demo - grep vs aidex](docs/aidex-demo.png)
 
-<details>
-<summary>Animated version</summary>
+| | Without AiDex | With AiDex |
+|---|---|---|
+| Find `PlayerHealth` | Grep → 200 hits in 40 files → reads 5 files → **2,000+ tokens** | 1 query → 3 exact locations → **~50 tokens** |
+| Get file structure | Reads entire 500-line file → **1,500 tokens** | Signatures → classes + methods → **~80 tokens** |
+| What changed today? | `git diff` + grep + context → **3,000+ tokens** | Time-filtered query → **~50 tokens** |
 
 ![AiDex Demo GIF](docs/aidex-demo.gif)
 
 </details>
 
-### What's Inside — 30 Tools in One Server
+### What's Inside — 33 Tools in One Server
 
 | Category | Tools | What it does |
 |----------|-------|--------------|
-| **Search & Index** | `init`, `query`, `update`, `remove`, `status` | Index your project, search identifiers by name (exact/contains/starts_with), time-based filtering |
+| **Semantic Search** 🆕 | `search`, `settings` | Hybrid / semantic / exact retrieval over code, docs & workspace. Settings tab to configure embeddings + LLM layer |
+| **Index & Identifier Search** | `init`, `query`, `update`, `remove`, `status` | Index your project, search identifiers by name (exact/contains/starts_with), time-based filtering |
 | **Signatures** | `signature`, `signatures` | Get classes + methods of any file without reading it — single file or glob pattern |
 | **Project Overview** | `summary`, `tree`, `describe`, `files` | Entry points, language breakdown, file tree with stats, file listing by type |
 | **Cross-Project** | `link`, `unlink`, `links`, `scan` | Link dependencies, discover indexed projects |
-| **Global Search** | `global_init`, `global_query`, `global_signatures`, `global_status`, `global_refresh` | Search across ALL your projects at once — "Have I ever written X?" |
+| **Global Search** | `global_init`, `global_query`, `global_signatures`, `global_status`, `global_refresh` | Search identifiers across ALL your projects — "Have I ever written X?" |
 | **Guidelines** | `global_guideline` | Persistent AI instructions & coding conventions — shared across all projects |
 | **Sessions** | `session`, `note` | Track sessions, detect external changes, leave notes for next session (with searchable history) |
 | **Task Backlog** | `task`, `tasks` | Built-in task management with priorities, tags, auto-logged history, and **scheduled/recurring tasks** |
 | **Log Hub** | `log` | Universal log receiver — any program sends logs via HTTP, queryable by the AI, live in Viewer |
 | **Screenshots** | `screenshot`, `windows` | Cross-platform screen capture with LLM optimization — scale + color reduction saves up to 95% tokens |
-| **Viewer** | `viewer` | Interactive browser UI with file tree, signatures, tasks, logs, and live reload |
+| **Viewer** | `viewer` | Interactive browser UI with file tree, signatures, tasks, logs, search, and live reload |
 
 **12 languages** — C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby, HCL/Terraform
 
@@ -67,7 +82,8 @@ aidex_task({ path: ".", action: "create", title: "Fix edge case in parser", prio
 
 ## Table of Contents
 
-- [What's Inside](#whats-inside--30-tools-in-one-server)
+- [What's Inside](#whats-inside--33-tools-in-one-server)
+- [Semantic Search & LLM Layer](#semantic-search--llm-layer) 🆕
 - [The Problem](#the-problem)
 - [The Solution](#the-solution)
 - [Why Not Just Grep?](#why-not-just-grep)
@@ -90,6 +106,51 @@ aidex_task({ path: ".", action: "create", title: "Fix edge case in parser", prio
 - [Technology](#technology)
 - [Contributing](#contributing)
 - [License](#license)
+
+## Semantic Search & LLM Layer
+
+**v2.0** added semantic search via locally-run embeddings — your AI can find a function even when it doesn't know the exact identifier.
+
+### Three modes — pick the right tool for the question
+
+| Mode | What it does | When to use |
+|------|--------------|-------------|
+| `exact` | Identifier match (same as `aidex_query`) | You know the name. `PlayerHealth` → 3 hits |
+| `semantic` | Vector KNN over embedded code+docs+workspace | You know the *concept*. "how do we cache the model" → finds `getQueryEmbedder` |
+| `hybrid` (default) | RRF fusion of both | Mixed queries. Robust by default |
+
+### What gets embedded
+
+- **Code** — every method and type, three-tier chunking (signature + doc-comment + weighted identifier bag)
+- **Docs** — Markdown sections (README, CHANGELOG, docs/, plan files), split at heading boundaries
+- **Workspace** — tasks, task logs, session notes, archived note history
+
+One ranking, all kinds. A query like *"how to write logs from external programs"* surfaces the README's `## Log Hub` section first, then the `log` method in `commands/log.ts`, then any related task.
+
+### Setup
+
+```js
+// Enable embeddings on a project (one-time, ~30s for AiDex itself, cached afterwards)
+aidex_init({ path: ".", embeddings: true })
+
+// Search
+aidex_search({ query: "how do we batch requests to the LLM", path: "." })
+aidex_search({ query: "retry with backoff", scope: "all" })  // across every embedded project
+```
+
+Or use the **Settings tab** in the Viewer (`aidex_settings({ path: ".", open: true })`) — toggles for embeddings, LLM provider, model, and the privacy switch.
+
+### Optional LLM layer
+
+When an Anthropic / OpenAI / OpenRouter / Ollama / HuggingFace API key is configured, AiDex can:
+
+- **Translate** non-English queries → "wie speichere ich Logs lokal" finds the right code
+- **Expand** vague queries into 2-4 concrete subqueries (RRF-merged)
+- **Rerank** top-N retrieval candidates
+
+Privacy switch `llm_send_code` defaults to **off** — only your literal query and metadata (paths, names, anchors) are sent. Code bodies stay local. Per-project, easy to verify in Settings.
+
+Local-first: works fully offline with pure embeddings. The LLM layer is opt-in, never required.
 
 ## The Problem
 

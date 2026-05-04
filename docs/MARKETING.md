@@ -34,6 +34,17 @@ Your chat ends. Context gone. Tomorrow you start from zero.
 
 One query. All your projects. Instantly. AiDex searches across your entire codebase — 10 projects or 200 — in milliseconds. No re-indexing, no waiting, no switching directories.
 
+### 🧬 Find Concepts, Not Just Names *(new in v2.0)*
+*"How do we batch requests to the LLM?"*
+
+You don't always know the function name — you know what you're looking for. AiDex 2.0 embeds your code, docs, and tasks into a semantic vector space. **Three modes**: `exact` (identifier match), `semantic` (concept match via 768-dim embeddings), `hybrid` (both, fused by Reciprocal Rank Fusion — the default).
+
+One ranking covers method bodies, README sections, and old task notes — *"how to write logs from external programs"* returns the README's Log Hub section first, then the actual `log` method, then the related task.
+
+**Optional LLM layer** translates non-English queries (German, French, Japanese — any language), expands vague queries into 2-4 concrete subqueries, and reranks top candidates. Anthropic, OpenAI, OpenRouter, Ollama, HuggingFace — your choice, or pure local embeddings without any LLM at all.
+
+**Privacy by default**: code bodies never leave your machine unless you flip the `llm_send_code` switch per project. Only your literal query + metadata (paths, names) get sent.
+
 ### 📡 See Your App's Logs in Real-Time
 Your game engine. Your Python script. Your C# desktop app. Whatever you're building — add one HTTP POST and watch logs stream live into your browser. The AI reads them too, spots the bug, and tells you where to look.
 

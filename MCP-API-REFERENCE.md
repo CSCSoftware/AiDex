@@ -12,6 +12,7 @@ Complete reference for all AiDex MCP tools.
   - [aidex_remove](#aidex_remove)
 - [Querying](#querying)
   - [aidex_query](#aidex_query)
+  - [aidex_search](#aidex_search) 🆕
   - [aidex_signature](#aidex_signature)
   - [aidex_signatures](#aidex_signatures)
 - [Project Info](#project-info)
@@ -28,6 +29,7 @@ Complete reference for all AiDex MCP tools.
 - [Session Management](#session-management)
   - [aidex_session](#aidex_session)
   - [aidex_note](#aidex_note)
+  - [aidex_settings](#aidex_settings) 🆕
   - [aidex_viewer](#aidex_viewer)
 - [Task Management](#task-management)
   - [aidex_task](#aidex_task)
@@ -170,6 +172,40 @@ Search for terms/identifiers in the index. **Primary search tool** - use instead
 
 // Filter by code type
 { "path": ".", "term": "Calculate", "type_filter": ["method"] }
+```
+
+---
+
+### aidex_search
+
+**(v2.0)** Semantic / exact / hybrid retrieval over embedded code, docs, and workspace items. Best for natural-language questions like *"how do we handle retry with backoff"* — finds the right file even when you don't know the identifier name. Requires `embeddings: true` on `aidex_init` for the project.
+
+**Parameters:**
+- `query` (string, required) — the search query: natural language for semantic, or a term for exact mode
+- `path` (string) — project path (required for `scope: "current"`, which is the default when path is set)
+- `mode` (string, default: `"hybrid"`) — `"semantic"` (pure vector KNN), `"exact"` (identifier match like `aidex_query`), `"hybrid"` (RRF fusion of both)
+- `scope` (string, default: `"current"` if path set, else `"all"`) — `"current"` (only this project), `"all"` (every project that has embeddings enabled), `"linked"` (this project + its linked dependencies)
+- `project_filter` (string[]) — glob patterns over project paths, e.g. `["Q:/develop/**"]`
+- `source_kinds` (string[]) — filter by content kind: `"code"`, `"docs"`, `"workspace"` (default: all)
+- `source_types` (string[]) — filter by source type: `"method"`, `"type"`, `"doc-section"`, `"task"`, `"task-log"`, `"note"`, `"note-history"`
+- `k` (number, default: 20) — number of results to return
+- `llm` (string, default: `"auto"`) — LLM-layer strategy: `"auto"` (translate non-English + rerank if key configured), `"off"` (pure embeddings), `"translate"`, `"rerank"`, `"expand+rerank"`. Per-project privacy switch `llm_send_code` controls whether code/snippets are sent.
+
+**Returns:** ranked list with file:line, snippet (≤180 chars), distance, source_kind, source_type, and project name when scope is global. When the LLM layer fired, a telemetry block reports which stages ran (`translate`, `expand`, `rerank`).
+
+**Examples:**
+```json
+// Natural-language hybrid search (default)
+{ "path": ".", "query": "how do we cache the embedding model" }
+
+// Pure semantic, only docs
+{ "path": ".", "query": "privacy switch", "mode": "semantic", "source_kinds": ["docs"] }
+
+// Cross-project — every embedded project
+{ "query": "retry with backoff", "scope": "all" }
+
+// LLM off — pure embeddings, deterministic
+{ "path": ".", "query": "settings save validation", "llm": "off" }
 ```
 
 ---
@@ -616,6 +652,36 @@ Read or write session notes. Persists in the database between sessions.
 // Last 5 archived notes
 { "path": ".", "history": true, "limit": 5 }
 ```
+
+---
+
+### aidex_settings
+
+**(v2.0)** Inspect or open the AiDex Settings tab — the central place for embeddings, LLM provider/key/model, and the `llm_send_code` privacy switch. Without `open: true` the tool returns the current settings as JSON for inspection.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `path` | string | ✅ | Path to project with `.aidex` directory |
+| `open` | boolean | - | If true, open the viewer (start it if needed) and switch to the Settings tab |
+
+**Returns (without `open`):**
+- `embeddings` — `{ enabled, modelId, dim, total, byKind, byType }` or `{ enabled: false }`
+- `llm` — active provider, endpoint, model, key source (env var name / file / none)
+- `llm_send_code` — privacy switch state (default: `false` — only metadata sent)
+- `version` — current AiDex version + last seen version
+
+**Examples:**
+```json
+// Inspect current settings
+{ "path": "." }
+
+// Open Settings tab in the Viewer
+{ "path": ".", "open": true }
+```
+
+The Settings tab features a custom combobox for model selection, a live API-key field that auto-detects environment variable names (e.g. `OPENAI_API_KEY`), a master toggle for the LLM layer (LLM only enables when embeddings are enabled), and a "Test connection" button with latency measurement. API keys persist to `~/.aidex/llm.json` (chmod 600).
 
 ---
 
