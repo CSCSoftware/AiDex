@@ -56,7 +56,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/CSCSoftware/AiDex.git"
+    "url": "git+https://github.com/CSCSoftware/AiDex.git"
   },
   "author": "Uwe Chalas",
   "license": "MIT",
