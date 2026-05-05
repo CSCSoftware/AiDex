@@ -282,15 +282,57 @@ export interface IndexDbHandle {
 export function openProjectIndexDb(projectPath: string): IndexDbHandle | null {
     const dbPath = join(projectPath, INDEX_DIR, 'index.db');
     if (!existsSync(dbPath)) return null;
+
+    // Pre-migrate: legacy DBs may lack columns the embedder reads.
+    // Open writable briefly, run idempotent ALTER TABLEs, then reopen readonly.
+    // Best-effort: if the write-open fails (DB locked by a concurrent writer,
+    // read-only filesystem, etc.) the read paths below are defensive.
+    try {
+        const writeDb = new Database(dbPath);
+        try {
+            const tableCols = (table: string) =>
+                new Set<string>(
+                    (writeDb.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+                        .map(r => r.name)
+                );
+            const methodCols = tableCols('methods');
+            if (methodCols.size > 0) {
+                if (!methodCols.has('body_text')) writeDb.exec("ALTER TABLE methods ADD COLUMN body_text TEXT");
+                if (!methodCols.has('body_lines')) writeDb.exec("ALTER TABLE methods ADD COLUMN body_lines INTEGER");
+                if (!methodCols.has('body_truncated')) writeDb.exec("ALTER TABLE methods ADD COLUMN body_truncated INTEGER DEFAULT 0");
+            }
+            const taskCols = tableCols('tasks');
+            if (taskCols.size > 0 && !taskCols.has('summary')) {
+                writeDb.exec('ALTER TABLE tasks ADD COLUMN summary TEXT');
+            }
+            const noteHistoryCols = tableCols('note_history');
+            if (noteHistoryCols.size > 0 && !noteHistoryCols.has('summary')) {
+                writeDb.exec('ALTER TABLE note_history ADD COLUMN summary TEXT');
+            }
+        } finally {
+            writeDb.close();
+        }
+    } catch {
+        // Ignore — read paths handle missing columns defensively
+    }
+
     const db = new Database(dbPath, { readonly: true });
     return { db, close: () => db.close() };
 }
 
+function methodsHasBodyText(handle: IndexDbHandle): boolean {
+    const cols = handle.db.prepare("PRAGMA table_info(methods)").all() as Array<{ name: string }>;
+    return cols.some(c => c.name === 'body_text');
+}
+
 export function readMethods(handle: IndexDbHandle): MethodForEmbedding[] {
+    const bodySelect = methodsHasBodyText(handle)
+        ? 'm.body_text as bodyText, m.body_lines as bodyLines'
+        : 'NULL as bodyText, NULL as bodyLines';
     const rows = handle.db
         .prepare(
             `SELECT m.id as methodId, m.name, m.prototype, m.line_number as lineNumber,
-                    m.body_text as bodyText, m.body_lines as bodyLines,
+                    ${bodySelect},
                     f.path as filePath
              FROM methods m JOIN files f ON m.file_id = f.id
              ORDER BY f.path, m.line_number`
@@ -380,19 +422,30 @@ export interface NoteHistoryForEmbedding {
 
 const SESSION_NOTE_KEY = 'session_note';
 
+function tableHasColumn(handle: IndexDbHandle, table: string, column: string): boolean {
+    try {
+        const cols = handle.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+        return cols.some(c => c.name === column);
+    } catch {
+        return false;
+    }
+}
+
 export function readAllTasks(handle: IndexDbHandle): TaskForEmbedding[] {
+    const summaryCol = tableHasColumn(handle, 'tasks', 'summary') ? 'summary' : 'NULL as summary';
     return handle.db
         .prepare(
-            `SELECT id, title, description, summary, tags, status, priority, updated_at
+            `SELECT id, title, description, ${summaryCol}, tags, status, priority, updated_at
              FROM tasks ORDER BY id`
         )
         .all() as TaskForEmbedding[];
 }
 
 export function readTaskById(handle: IndexDbHandle, id: number): TaskForEmbedding | null {
+    const summaryCol = tableHasColumn(handle, 'tasks', 'summary') ? 'summary' : 'NULL as summary';
     const row = handle.db
         .prepare(
-            `SELECT id, title, description, summary, tags, status, priority, updated_at
+            `SELECT id, title, description, ${summaryCol}, tags, status, priority, updated_at
              FROM tasks WHERE id = ?`
         )
         .get(id) as TaskForEmbedding | undefined;
@@ -427,9 +480,10 @@ export function readSessionNote(handle: IndexDbHandle): string | null {
 }
 
 export function readNoteHistory(handle: IndexDbHandle): NoteHistoryForEmbedding[] {
+    const summaryCol = tableHasColumn(handle, 'note_history', 'summary') ? 'summary' : 'NULL as summary';
     return handle.db
         .prepare(
-            `SELECT id, note, summary, created_at FROM note_history ORDER BY id`
+            `SELECT id, note, ${summaryCol}, created_at FROM note_history ORDER BY id`
         )
         .all() as NoteHistoryForEmbedding[];
 }
@@ -815,10 +869,13 @@ export async function pruneFileEmbeddingsExcept(
 
 /** Read methods+types limited to one file path. Mirrors readMethods/readTypes. */
 export function readMethodsForFile(handle: IndexDbHandle, filePath: string): MethodForEmbedding[] {
+    const bodySelect = methodsHasBodyText(handle)
+        ? 'm.body_text as bodyText, m.body_lines as bodyLines'
+        : 'NULL as bodyText, NULL as bodyLines';
     const rows = handle.db
         .prepare(
             `SELECT m.id as methodId, m.name, m.prototype, m.line_number as lineNumber,
-                    m.body_text as bodyText, m.body_lines as bodyLines,
+                    ${bodySelect},
                     f.path as filePath
              FROM methods m JOIN files f ON m.file_id = f.id
              WHERE f.path = ?

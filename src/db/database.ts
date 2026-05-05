@@ -103,6 +103,12 @@ export class AiDexDatabase {
             // doesn't allow it, we'd need to rebuild the table. That's already
             // handled by ensureTaskTables() in commands/task.ts on first task call.
         }
+
+        // note_history.summary (added when archived-note summaries were introduced)
+        const noteHistoryCols = this.tableColumns('note_history');
+        if (noteHistoryCols.size > 0 && !noteHistoryCols.has('summary')) {
+            this.db.exec('ALTER TABLE note_history ADD COLUMN summary TEXT');
+        }
     }
 
     private tableColumns(table: string): Set<string> {
