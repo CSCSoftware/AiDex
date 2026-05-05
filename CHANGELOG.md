@@ -2,6 +2,17 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [2.0.1] - 2026-05-05
+
+Bug-fix release. Two issues that surfaced when running `aidex_init({ embeddings: true })` in real-world workflows with mixed-age project DBs and concurrent calls.
+
+### Fixed
+- **Embedder crashed on legacy project DBs with "no such column"**: Projects whose `index.db` predated the v1.19a / v1.15 / archive-summary migrations crashed `aidex_init({ embeddings: true })` with `SqliteError: no such column: m.body_text` (or `tasks.summary` / `note_history.summary`). The embedder opens each project's `index.db` read-only, so the writeable `migrateLegacySchema()` path in `db/database.ts` never ran on those DBs — and the `SELECT`s in `embeddings/store.ts` referenced the missing columns directly. `openProjectIndexDb()` now opens the DB writeable briefly to apply the same idempotent ALTER TABLEs, then reopens read-only. Belt-and-suspenders: `readMethods` / `readMethodsForFile` / `readAllTasks` / `readNoteHistory` now check `PRAGMA table_info` and substitute `NULL` for missing columns, so even a locked / read-only DB no longer crashes — it just produces embeddings without the optional context fields. `migrateLegacySchema` itself was missing the `note_history.summary` ALTER and got it added.
+- **Concurrent `indexProject` calls loaded N copies of the embedding model**: When several `aidex_init` (or `indexProject`) calls fired before the embedder was warm — a typical user pattern after global enable — every caller raced past the `this.embedder == null` check in `RealEmbeddings.getEmbedder()` and started its own `createEmbedder()`. Each load pulled the ~7 GB ONNX model into RAM. 14 parallel calls reproducibly produced ~98 GB RSS. Fix: the in-flight load is now cached as a `Promise<Embedder>`, so concurrent callers `await` the same load and the model is loaded exactly once. Verified with a 14-parallel stress harness: peak RSS during the run dropped from 12 GB to 92 MB; end-of-run RSS dropped from 98 GB to 12 GB.
+
+### Added
+- **Regression tests for the above** (`tests/embedder-fixes.test.js`): 12 jest tests covering legacy-schema migration on each affected table, defensive read paths when columns are missing, idempotency of `openProjectIndexDb`, and the Promise-cache mechanism that prevents the N-way embedder load.
+
 ## [2.0.0] - 2026-05-04
 
 **Major release** — AiDex grew a brain. Semantic search across code, docs, and workspace items via locally-run embeddings (jina-code, 768d). Optional LLM layer for multilingual queries and reranking. New Settings tab in the Viewer. Schema migrated to v1.2 (additive — existing indexes keep working).
