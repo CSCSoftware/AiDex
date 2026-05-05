@@ -2,7 +2,7 @@
 
 MCP Server für persistentes Code-Indexing. Ermöglicht Claude Code schnelle, präzise Suchen statt Grep/Glob.
 
-**Version:** 1.18.0 | **Sprachen:** 12 | **Repo:** https://github.com/CSCSoftware/AiDex
+**Version:** 2.0.1 | **Sprachen:** 12 | **Repo:** https://github.com/CSCSoftware/AiDex
 
 ## Build & Run
 

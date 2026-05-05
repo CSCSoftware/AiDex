@@ -97,6 +97,14 @@ class RealEmbeddings implements EmbeddingsModule {
     private schemaReady = false;
     private embedder: Embedder | null = null;
     private embedderModelId: string | null = null;
+    /**
+     * In-flight load of the embedder. When several indexProject() calls run
+     * concurrently and the model isn't loaded yet, every caller would otherwise
+     * race past the `this.embedder == null` check and start its own
+     * createEmbedder() — yielding N copies of the ~7 GB ONNX model in RAM.
+     * We share the load Promise so only the first caller actually starts it.
+     */
+    private embedderLoad: Promise<Embedder> | null = null;
 
     private ensureSchema(): void {
         if (!this.schemaReady) {
@@ -107,14 +115,25 @@ class RealEmbeddings implements EmbeddingsModule {
 
     private async getEmbedder(modelId: string): Promise<Embedder> {
         if (this.embedder && this.embedderModelId === modelId) return this.embedder;
-        if (this.embedder) {
-            await this.embedder.dispose();
-            this.embedder = null;
+        if (this.embedderLoad) return this.embedderLoad;
+
+        this.embedderLoad = (async () => {
+            if (this.embedder) {
+                await this.embedder.dispose();
+                this.embedder = null;
+            }
+            const model = getModel(modelId);
+            const e = await createEmbedder(model);
+            this.embedder = e;
+            this.embedderModelId = modelId;
+            return e;
+        })();
+
+        try {
+            return await this.embedderLoad;
+        } finally {
+            this.embedderLoad = null;
         }
-        const model = getModel(modelId);
-        this.embedder = await createEmbedder(model);
-        this.embedderModelId = modelId;
-        return this.embedder;
     }
 
     isEnabled(projectPath: string): boolean {
