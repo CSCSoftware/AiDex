@@ -53,6 +53,10 @@ interface ViewerMessage {
     scope?: 'current' | 'all' | 'linked';
     sourceKinds?: Array<'code' | 'docs' | 'workspace'>;
     k?: number;
+    projectFilter?: string[];
+    // getFileContent: optional cross-project read (must be a path of an
+    // embeddings-enabled project registered in ~/.aidex/global.db).
+    projectPath?: string;
     // setSettings payload
     payload?: {
         enableEmbeddings?: boolean;
@@ -267,8 +271,41 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
                     ws.send(JSON.stringify({ type: 'signature', file: msg.file, data: signature }));
                 }
                 else if (msg.type === 'getFileContent' && msg.file) {
-                    const content = getFileContent(projectRoot, msg.file);
-                    ws.send(JSON.stringify({ type: 'fileContent', file: msg.file, data: content }));
+                    // Cross-project read: when msg.projectPath is set and is a different
+                    // project, validate it's an embeddings-enabled project registered in
+                    // the global DB before reading. Default falls back to current project.
+                    let readRoot = projectRoot;
+                    let crossProjectName: string | undefined;
+                    let crossProjectError: string | undefined;
+                    const normRequested = typeof msg.projectPath === 'string'
+                        ? path.resolve(msg.projectPath).replace(/\\/g, '/')
+                        : '';
+                    const normCurrent = path.resolve(projectRoot).replace(/\\/g, '/');
+                    if (normRequested.length > 0 && normRequested !== normCurrent) {
+                        const guard = await resolveCrossProjectRoot(normRequested);
+                        if (guard.ok) {
+                            readRoot = guard.root;
+                            crossProjectName = guard.name;
+                        } else {
+                            crossProjectError = guard.error;
+                        }
+                    }
+                    if (crossProjectError) {
+                        ws.send(JSON.stringify({
+                            type: 'fileContent',
+                            file: msg.file,
+                            data: { error: crossProjectError },
+                        }));
+                    } else {
+                        const content = getFileContent(readRoot, msg.file);
+                        ws.send(JSON.stringify({
+                            type: 'fileContent',
+                            file: msg.file,
+                            data: content,
+                            projectPath: crossProjectName ? path.resolve(readRoot) : undefined,
+                            projectName: crossProjectName,
+                        }));
+                    }
                 }
                 else if (msg.type === 'getTasks') {
                     const freshDb = openDatabase(dbPath, true);
@@ -346,10 +383,14 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
                     const requestId = msg.requestId;
                     try {
                         const { getEmbeddings } = await import('../embeddings/index.js');
+                        const filter = Array.isArray(msg.projectFilter)
+                            ? msg.projectFilter.filter(s => typeof s === 'string' && s.trim().length > 0)
+                            : undefined;
                         const r = await getEmbeddings().searchWithTelemetry({
                             query: msg.query,
                             path: projectPath,
                             scope: (msg.scope as 'current' | 'all' | 'linked' | undefined) ?? 'current',
+                            projectFilter: filter && filter.length > 0 ? filter : undefined,
                             sourceKinds: msg.sourceKinds as Array<'code' | 'docs' | 'workspace'> | undefined,
                             mode: (msg.mode as 'semantic' | 'hybrid' | 'exact' | undefined) ?? 'hybrid',
                             k: typeof msg.k === 'number' ? msg.k : 20,
@@ -752,6 +793,43 @@ async function getFileSignature(db: Database.Database, filePath: string): Promis
             line: t.line_number
         }))
     };
+}
+
+/**
+ * Validate that a cross-project read request points at a project that's
+ * registered in ~/.aidex/global.db. This is the whitelist gate for letting
+ * the Source tab show files from a different project (e.g. after a global
+ * search hit). Without this, msg.projectPath would let any caller read any
+ * directory via the WebSocket.
+ */
+async function resolveCrossProjectRoot(
+    requestedPath: string
+): Promise<{ ok: true; root: string; name: string } | { ok: false; error: string }> {
+    try {
+        const mod = await import('../db/global-database.js');
+        const { openGlobalDatabase, globalDbExists } = mod;
+        if (!globalDbExists()) {
+            return { ok: false, error: 'Cross-project read requires a global AiDex index' };
+        }
+        const gdb = openGlobalDatabase();
+        try {
+            // Global DB stores paths with forward slashes; normalise the request
+            // to match (path.resolve on Windows would produce backslashes).
+            const normalised = path.resolve(requestedPath).replace(/\\/g, '/');
+            const project = gdb.getProjectByPath(normalised);
+            if (!project) {
+                return { ok: false, error: 'Project not registered in global AiDex index: ' + normalised };
+            }
+            return { ok: true, root: project.path, name: project.name };
+        } finally {
+            gdb.close();
+        }
+    } catch (err) {
+        return {
+            ok: false,
+            error: 'Cross-project read failed: ' + (err instanceof Error ? err.message : String(err)),
+        };
+    }
 }
 
 const FILE_SIZE_LIMIT = 1 * 1024 * 1024; // 1 MB
@@ -1548,6 +1626,34 @@ function getViewerHTML(projectPath: string): string {
         .search-badge.code     { color: var(--accent-cyan);   border-color: var(--accent-cyan); }
         .search-badge.docs     { color: var(--accent-yellow); border-color: var(--accent-yellow); }
         .search-badge.workspace{ color: var(--accent-purple); border-color: var(--accent-purple); }
+        .search-badge.project  { color: var(--accent-orange); border-color: var(--accent-orange); }
+        .search-result.foreign {
+            border-left: 3px solid var(--accent-orange);
+            padding-left: 9px;
+        }
+        .search-filter {
+            flex: 1;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 0.9em;
+            font-family: 'Consolas', 'Monaco', monospace;
+            margin-left: 8px;
+            min-width: 200px;
+        }
+        .search-filter:focus { outline: none; border-color: var(--accent-cyan); }
+        .cross-project-banner {
+            background: var(--bg-tertiary);
+            color: var(--accent-orange);
+            border-left: 3px solid var(--accent-orange);
+            padding: 6px 10px;
+            margin: 6px 0;
+            font-size: 0.85em;
+            font-family: 'Consolas', 'Monaco', monospace;
+            border-radius: 3px;
+        }
         .search-result-name { flex: 1; word-break: break-word; }
         .search-result-dist {
             color: var(--text-muted);
@@ -1555,9 +1661,10 @@ function getViewerHTML(projectPath: string): string {
             font-family: 'Consolas', 'Monaco', monospace;
         }
         .search-result-loc {
-            color: var(--text-secondary);
+            color: var(--accent-cyan);
             font-size: 0.85em;
             font-family: 'Consolas', 'Monaco', monospace;
+            font-weight: 600;
             margin-bottom: 4px;
         }
         .search-result-snippet {
@@ -1902,6 +2009,16 @@ function getViewerHTML(projectPath: string): string {
 
     <script>
         let ws = new WebSocket('ws://localhost:${PORT}');
+        // Normalised to forward-slashes so the comparison with global.db
+        // project paths (always forward-slash) works on Windows too.
+        const CURRENT_PROJECT_PATH = ${JSON.stringify(path.resolve(projectPath).replace(/\\/g, '/'))};
+        // When the active file is a cross-project read (from a global search
+        // hit), this holds the foreign project's path so re-reads triggered by
+        // tab-switches keep using the same project context.
+        let currentForeignProjectPath = '';
+        function normalizeProjectPath(p) {
+            return String(p || '').replace(/\\\\/g, '/');
+        }
         let selectedNode = null;
         let currentFile = null;
         let currentTreeMode = 'code';
@@ -1978,9 +2095,14 @@ function getViewerHTML(projectPath: string): string {
                     renderSignature(msg.file, msg.data);
                 }
             } else if (msg.type === 'fileContent') {
-                cachedContent = { file: msg.file, data: msg.data };
+                cachedContent = {
+                    file: msg.file,
+                    data: msg.data,
+                    projectName: msg.projectName || null,
+                    projectPath: msg.projectPath || null,
+                };
                 if (currentDetailTab === 'source') {
-                    renderFileContent(msg.file, msg.data);
+                    renderFileContent(msg.file, msg.data, cachedContent);
                 }
             } else if (msg.type === 'tasks') {
                 cachedTasks = msg.data;
@@ -2033,10 +2155,12 @@ function getViewerHTML(projectPath: string): string {
                     if (!currentFile) {
                         document.getElementById('detail').innerHTML = '<div class="empty-state"><p>Click on a file to view its source</p></div>';
                     } else if (cachedContent && cachedContent.file === currentFile) {
-                        renderFileContent(cachedContent.file, cachedContent.data);
+                        renderFileContent(cachedContent.file, cachedContent.data, cachedContent);
                     } else {
                         document.getElementById('detail').innerHTML = '<div class="loading">Loading source...</div>';
-                        ws.send(JSON.stringify({ type: 'getFileContent', file: currentFile }));
+                        const req = { type: 'getFileContent', file: currentFile };
+                        if (currentForeignProjectPath) req.projectPath = currentForeignProjectPath;
+                        ws.send(JSON.stringify(req));
                     }
                 } else if (currentDetailTab === 'tasks') {
                     if (cachedTasks) {
@@ -2146,6 +2270,7 @@ function getViewerHTML(projectPath: string): string {
                     div.classList.add('selected');
                     selectedNode = div;
                     currentFile = node.path;
+                    currentForeignProjectPath = '';
                     cachedSignature = null;
                     cachedContent = null;
 
@@ -2218,7 +2343,7 @@ function getViewerHTML(projectPath: string): string {
             detail.innerHTML = html;
         }
 
-        function renderFileContent(filePath, data) {
+        function renderFileContent(filePath, data, meta) {
             const detail = document.getElementById('detail');
 
             if (data.error) {
@@ -2226,7 +2351,14 @@ function getViewerHTML(projectPath: string): string {
                 return;
             }
 
+            const isCrossProject = meta && meta.projectName && meta.projectPath
+                && normalizeProjectPath(meta.projectPath) !== CURRENT_PROJECT_PATH;
+
             let html = '<h2>' + filePath.split('/').pop() + '</h2>';
+            if (isCrossProject) {
+                html += '<div class="cross-project-banner">Cross-project read-only · '
+                    + escapeHtml(meta.projectName) + ' (' + escapeHtml(meta.projectPath) + ')</div>';
+            }
             html += '<div class="file-path">' + filePath + '</div>';
             html += '<div class="code-view"><pre><code class="language-' + data.language + '">' + escapeHtml(data.content) + '</code></pre></div>';
 
@@ -2447,6 +2579,8 @@ function getViewerHTML(projectPath: string): string {
             mode: 'hybrid',
             kinds: { code: true, docs: true, workspace: true },
             k: 20,
+            scope: 'current',         // 'current' | 'all'
+            projectFilter: '',         // glob string, e.g. "*Aidex*"; empty = no filter
             inFlight: 0,
             results: null,
             error: null,
@@ -2466,6 +2600,17 @@ function getViewerHTML(projectPath: string): string {
                             <input type="text" class="search-input" id="searchInput"
                                 placeholder="Ask a question — e.g. 'how do we cache the embedding model'"
                                 autocomplete="off" />
+                        </div>
+                        <div class="search-row">
+                            <div class="search-segment" id="searchScopeSeg" title="Search this project only, or all projects with embeddings enabled">
+                                <input type="radio" name="searchScope" id="scope-current" value="current" checked>
+                                <label for="scope-current">This project</label>
+                                <input type="radio" name="searchScope" id="scope-all" value="all">
+                                <label for="scope-all">All projects</label>
+                            </div>
+                            <input type="text" class="search-filter" id="searchProjectFilter"
+                                placeholder="Project filter (glob, e.g. *Aidex*)" autocomplete="off"
+                                style="display:none;" />
                         </div>
                         <div class="search-row">
                             <div class="search-segment" id="searchModeSeg">
@@ -2513,6 +2658,15 @@ function getViewerHTML(projectPath: string): string {
                 const el = document.getElementById('kind-' + k);
                 if (el) el.checked = !!searchState.kinds[k];
             });
+            ['current','all'].forEach(s => {
+                const el = document.getElementById('scope-' + s);
+                if (el) el.checked = (s === searchState.scope);
+            });
+            const filterInput = document.getElementById('searchProjectFilter');
+            if (filterInput) {
+                filterInput.value = searchState.projectFilter;
+                filterInput.style.display = (searchState.scope === 'all') ? '' : 'none';
+            }
             renderSearchResults();
             if (input) setTimeout(() => input.focus(), 50);
         }
@@ -2547,6 +2701,26 @@ function getViewerHTML(projectPath: string): string {
             slider.addEventListener('change', () => {
                 if (searchState.query.trim()) runSearchNow();
             });
+            document.querySelectorAll('input[name="searchScope"]').forEach(r => {
+                r.addEventListener('change', () => {
+                    searchState.scope = document.querySelector('input[name="searchScope"]:checked').value;
+                    const f = document.getElementById('searchProjectFilter');
+                    if (f) f.style.display = (searchState.scope === 'all') ? '' : 'none';
+                    if (searchState.query.trim()) runSearchNow();
+                });
+            });
+            const filterInput = document.getElementById('searchProjectFilter');
+            if (filterInput) {
+                filterInput.addEventListener('input', () => {
+                    searchState.projectFilter = filterInput.value;
+                });
+                filterInput.addEventListener('change', () => {
+                    if (searchState.query.trim() && searchState.scope === 'all') runSearchNow();
+                });
+                filterInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); runSearchNow(); }
+                });
+            }
         }
 
         function scheduleSearch() {
@@ -2573,10 +2747,15 @@ function getViewerHTML(projectPath: string): string {
             searchState.inFlight = searchRequestSeq;
             searchState.error = null;
             renderSearchResults();
+            const filter = (searchState.scope === 'all' && searchState.projectFilter.trim())
+                ? [searchState.projectFilter.trim()]
+                : undefined;
             ws.send(JSON.stringify({
                 type: 'searchEmbeddings',
                 query: q,
                 mode: searchState.mode,
+                scope: searchState.scope,
+                projectFilter: filter,
                 sourceKinds: kinds,
                 k: searchState.k,
                 requestId: searchRequestSeq,
@@ -2627,12 +2806,31 @@ function getViewerHTML(projectPath: string): string {
                     try {
                         const path = el.dataset.path;
                         const kind = el.dataset.kind;
+                        const foreignProjectPath = el.dataset.projectPath || '';
                         if (kind === 'workspace') {
                             const tasksTab = document.querySelector('.detail-panel .tab[data-tab="tasks"]');
                             if (tasksTab) tasksTab.click();
                             return;
                         }
                         if (path) {
+                            if (foreignProjectPath) {
+                                // Cross-project hit: bypass tree (tree only shows the
+                                // current project's files); open Source tab in
+                                // read-only cross-project mode.
+                                currentFile = path;
+                                currentForeignProjectPath = foreignProjectPath;
+                                cachedSignature = null;
+                                cachedContent = null;
+                                ws.send(JSON.stringify({
+                                    type: 'getFileContent',
+                                    file: path,
+                                    projectPath: foreignProjectPath,
+                                }));
+                                const sourceTab = document.querySelector('.detail-panel .tab[data-tab="source"]');
+                                if (sourceTab) sourceTab.click();
+                                return;
+                            }
+                            currentForeignProjectPath = '';
                             // Find the file node in the tree and select it (mirrors a tree click).
                             const treeNode = document.querySelector('.tree-node[data-path="' + cssEsc(path) + '"]');
                             if (treeNode) {
@@ -2684,14 +2882,21 @@ function getViewerHTML(projectPath: string): string {
                 ? \`\${h.sourcePath}\${h.sourceLine ? ':' + h.sourceLine : ''}\`
                 : '(workspace)';
             const snippet = h.sourceText ? escapeHtml(h.sourceText) : '';
+            const isForeign = h.projectPath && normalizeProjectPath(h.projectPath) !== CURRENT_PROJECT_PATH;
+            const projectBadge = isForeign
+                ? \`<span class="search-badge project">\${escapeHtml(h.projectName || h.projectPath)}</span>\`
+                : '';
             return \`
-                <div class="search-result"
+                <div class="search-result\${isForeign ? ' foreign' : ''}"
                      data-path="\${h.sourcePath ? escapeAttr(h.sourcePath) : ''}"
                      data-kind="\${kind}"
-                     data-type="\${type}">
+                     data-type="\${type}"
+                     data-project-path="\${isForeign ? escapeAttr(h.projectPath) : ''}"
+                     data-project-name="\${isForeign ? escapeAttr(h.projectName || '') : ''}">
                     <div class="search-result-head">
                         <span class="search-result-rank">#\${h.rank}</span>
                         <span class="search-badge \${kind}">\${kind}/\${type}</span>
+                        \${projectBadge}
                         <span class="search-result-name">\${escapeHtml(name)}</span>
                         <span class="search-result-dist">\${dist}</span>
                     </div>
