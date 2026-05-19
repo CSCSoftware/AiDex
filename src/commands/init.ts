@@ -3,12 +3,66 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, statSync } from 'fs';
-import { join, relative, basename, extname } from 'path';
+import { join, relative, basename, extname, dirname } from 'path';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 import { glob } from 'glob';
 import { createHash } from 'crypto';
 import { minimatch } from 'minimatch';
 import { INDEX_DIR } from '../constants.js';
 import { invalidateGlobalCache } from './global/global-query.js';
+import type { IndexResult } from '../embeddings/index.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+/**
+ * Run embedding in a fully isolated child process (spawn, not fork) so an
+ * ONNX OOM crash kills only the worker — the MCP server stays alive.
+ * Communication via stdin/stdout JSON. Timeout: 10 minutes per project.
+ */
+function indexProjectInWorker(projectPath: string, force = false): Promise<IndexResult> {
+    return new Promise((resolve, reject) => {
+        const workerPath = join(__dirname, '..', 'embeddings', 'embed-worker.js');
+        const child = spawn(process.execPath, [workerPath], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+        });
+
+        const timeout = setTimeout(() => {
+            child.kill();
+            reject(new Error('Embedding timed out after 10 minutes'));
+        }, 10 * 60 * 1000);
+
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+        child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+
+        child.on('error', (err) => {
+            clearTimeout(timeout);
+            reject(err);
+        });
+
+        child.on('close', (code) => {
+            clearTimeout(timeout);
+            try {
+                const msg = JSON.parse(stdout.trim());
+                if (msg.ok) {
+                    resolve({ embedded: msg.embedded, skipped: msg.skipped, removed: msg.removed, durationMs: msg.durationMs });
+                } else {
+                    reject(new Error(msg.error ?? `Worker failed (exit ${code})`));
+                }
+            } catch {
+                const errDetail = stderr.split('\n')[0].slice(0, 200);
+                reject(new Error(`Worker exited with code ${code}${errDetail ? ': ' + errDetail : ' (likely OOM)'}`));
+            }
+        });
+
+        // Send the request via stdin and close it so the worker knows input is done.
+        child.stdin.write(JSON.stringify({ projectPath, force }));
+        child.stdin.end();
+    });
+}
 
 /**
  * Compute a short (16-char) SHA256 hash of content.
@@ -131,6 +185,50 @@ export function readGitignore(projectPath: string): string[] {
             }
             return pattern;
         });
+}
+
+function parseIgnoreFile(filePath: string): string[] {
+    if (!existsSync(filePath)) return [];
+    const content = readFileSync(filePath, 'utf-8');
+    return content
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('#') && !line.startsWith('!'))
+        .map(pattern => {
+            if (pattern.endsWith('/')) return `**/${pattern}**`;
+            if (!pattern.includes('/') && !pattern.startsWith('*')) return `**/${pattern}`;
+            return pattern;
+        });
+}
+
+// Binary/asset extensions always excluded from embeddings
+const EMBED_BINARY_EXCLUDE = [
+    '**/*.png', '**/*.jpg', '**/*.jpeg', '**/*.gif', '**/*.ico', '**/*.webp',
+    '**/*.svg', '**/*.bmp', '**/*.tiff', '**/*.exr', '**/*.psd', '**/*.afphoto',
+    '**/*.mp3', '**/*.mp4', '**/*.wav', '**/*.ogg', '**/*.webm', '**/*.flac',
+    '**/*.m4a', '**/*.aac',
+    '**/*.dll', '**/*.so', '**/*.dylib', '**/*.exe', '**/*.bin', '**/*.obj',
+    '**/*.pdb', '**/*.lib', '**/*.a', '**/*.o',
+    '**/*.zip', '**/*.tar', '**/*.gz', '**/*.rar', '**/*.7z',
+    '**/*.pdf', '**/*.doc', '**/*.docx', '**/*.xls', '**/*.xlsx',
+    '**/*.ttf', '**/*.otf', '**/*.woff', '**/*.woff2', '**/*.eot',
+    '**/*.fbx', '**/*.obj', '**/*.glb', '**/*.gltf', '**/*.blend',
+    '**/*.onnx', '**/*.pt', '**/*.nn', '**/*.tflite',
+    '**/*.meta', '**/*.asset', '**/*.prefab', '**/*.unity', '**/*.mat',
+    '**/*.lock',
+];
+
+/**
+ * Returns embed-exclude patterns for a project.
+ * Falls back to .aidexignore patterns if no .aidexembedignore exists.
+ * Always adds binary/asset exclusions on top.
+ */
+export function readAidexEmbedIgnore(projectPath: string): string[] {
+    const embedIgnorePath = join(projectPath, '.aidexembedignore');
+    const base = existsSync(embedIgnorePath)
+        ? parseIgnoreFile(embedIgnorePath)
+        : parseIgnoreFile(join(projectPath, '.aidexignore'));
+    return [...EMBED_BINARY_EXCLUDE, ...base];
 }
 
 // ============================================================
@@ -392,14 +490,12 @@ export async function init(params: InitParams): Promise<InitResult> {
     invalidateGlobalCache();
 
     // Optional: build/refresh embeddings for this project.
-    // Failures here must not break the init result — embeddings are opt-in.
+    // Runs entirely in a child process (enable + index) so an ONNX OOM crash
+    // cannot kill the MCP server.
     let embeddingsResult: InitResult['embeddings'];
     if (params.embeddings === true) {
         try {
-            const { getEmbeddings } = await import('../embeddings/index.js');
-            const e = getEmbeddings();
-            await e.enable(params.path);
-            const r = await e.indexProject(params.path);
+            const r = await indexProjectInWorker(params.path);
             embeddingsResult = {
                 embedded: r.embedded,
                 skipped: r.skipped,

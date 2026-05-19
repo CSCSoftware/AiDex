@@ -2,6 +2,32 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [2.1.0] - 2026-05-19
+
+Stability release. Two independent root causes that crashed the embedding pipeline in production — one silently killing the entire MCP server process, the other silently generating impossible memory allocations — are now both permanently prevented.
+
+### Fixed
+
+- **ONNX OOM killed the entire MCP server process**: Projects with large generated files (Blazor WASM bundles, large C++ translation units, minified JS) caused the ONNX runtime to request allocations of 67–93 GB of RAM. Because the ONNX model ran inside the MCP server process, the resulting `std::bad_alloc` killed the server — disconnecting Claude from every tool and requiring a manual `/mcp` reconnect. Root cause: the embedding model ran directly in the MCP server's Node.js heap with no crash isolation.
+
+  **Fix — Worker process isolation** (`src/commands/init.ts` + `src/embeddings/embed-worker.ts`): `aidex_init({ embeddings: true })` now spawns a dedicated child process via `spawn(process.execPath, [workerPath], { stdio: ['pipe','pipe','pipe'] })` for each embedding run. The worker reads the project path from stdin as JSON, runs the full pipeline, and writes the result to stdout. When ONNX OOMs, only the worker dies — the MCP server survives and reports a Warning in the `aidex_init` result instead of crashing. A 10-minute timeout kills runaway workers automatically.
+
+  Verified: projects that previously killed the server (`YouTubeVoiceOver`, `CiscoWebExTranslator/cpp`, `UcHome`) now complete with a Warning rather than disconnecting Claude.
+
+- **ONNX OOM on large source files**: Even with worker isolation, files larger than ~50 KB reliably triggered the ONNX `Non-zero status code returned while running Add node` error inside the worker, causing the worker to exit with code 3228369023 (Windows `STATUS_ACCESS_VIOLATION`). Root cause: the jina-code model's attention layers allocate O(n²) memory relative to token count — a 63 KB file with deeply nested methods produces a sequence too long for the model's fixed-size buffers.
+
+  **Fix — 25 KB file size limit** (`src/embeddings/pipeline.ts`): Methods, types, and doc-sections from files larger than 25 KB are silently skipped during embedding. File sizes are resolved once per file via `statSync` and cached for the run. The limit applies in `collectCodeWrites()`, `collectDocsWrites()`, and `updateFile()` — covering both full re-index and incremental update paths. Files below the limit are embedded normally; files above it are excluded without error or warning.
+
+  Verified: `TwSudoku` (Blazor WASM JS bundles >1 MB + 14 C# files), `YouTubeVoiceOver` (63 KB `TranscriptProcessor.cs`), and `UcHome` (ESP32 SDK managed components) all complete cleanly. A 6-worker parallel stress test across all 252 registered projects completed in 33 minutes with 0 crashes and 0 errors.
+
+### Added
+
+- **`src/embeddings/embed-worker.ts`**: Standalone embedding worker entry point. Reads `{ projectPath, force? }` from stdin, calls `createRealModule().enable()` + `.indexProject()`, writes `{ ok, embedded, skipped, removed, durationMs }` (or `{ ok: false, error }`) to stdout, then exits. Has no IPC channel — crash isolation relies entirely on process separation.
+
+### Changed
+
+- **`aidex_init` with `embeddings: true`** no longer runs the embedding model in-process. The spawn-based worker adds ~100 ms overhead per project but eliminates the possibility of an ONNX crash affecting the MCP server.
+
 ## [2.0.1] - 2026-05-05
 
 Bug-fix release. Two issues that surfaced when running `aidex_init({ embeddings: true })` in real-world workflows with mixed-age project DBs and concurrent calls.

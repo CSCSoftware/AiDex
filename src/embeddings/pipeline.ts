@@ -7,7 +7,25 @@
  */
 
 import { join } from 'path';
+import { statSync } from 'fs';
+import { minimatch } from 'minimatch';
 
+const MAX_EMBED_FILE_BYTES = 25 * 1024; // 25 KB — larger files risk ONNX OOM
+
+const fileSizeCache = new Map<string, number>();
+function getFileSize(absPath: string): number {
+    const cached = fileSizeCache.get(absPath);
+    if (cached !== undefined) return cached;
+    try {
+        const size = statSync(absPath).size;
+        fileSizeCache.set(absPath, size);
+        return size;
+    } catch {
+        return 0;
+    }
+}
+
+import { readAidexEmbedIgnore } from '../commands/init.js';
 import { chunkCode } from './chunker.js';
 import { chunkMarkdown } from './chunker-docs.js';
 import { chunkNote, chunkTask, chunkTaskLog } from './chunker-workspace.js';
@@ -73,6 +91,11 @@ const NOT_YET = (what: string) =>
     new Error(`${what} is not implemented yet. Coming in a later phase.`);
 
 const BATCH_SIZE = 32;
+
+function isEmbedExcluded(filePath: string, patterns: string[]): boolean {
+    const normalized = filePath.replace(/\\/g, '/');
+    return patterns.some(p => minimatch(normalized, p, { dot: true }));
+}
 
 /**
  * De-duplicate writes by (sourceType, sourcePath, sourceAnchor). Some sources
@@ -220,8 +243,11 @@ class RealEmbeddings implements EmbeddingsModule {
         project: ProjectEmbeddingInfo,
         writes: EmbeddingWrite[]
     ): void {
+        const embedExclude = readAidexEmbedIgnore(project.path);
         const files = listDocFiles(handle, project.path);
         for (const f of files) {
+            if (isEmbedExcluded(f.path, embedExclude)) continue;
+            if (getFileSize(f.absPath) > MAX_EMBED_FILE_BYTES) continue;
             const source = readDocFile(f.absPath);
             if (source === null) continue;
             const chunks = chunkMarkdown(source);
@@ -373,9 +399,13 @@ class RealEmbeddings implements EmbeddingsModule {
         project: ProjectEmbeddingInfo,
         writes: EmbeddingWrite[]
     ): void {
+        const embedExclude = readAidexEmbedIgnore(project.path);
+
         // Methods
         const methods = readMethods(handle!);
         for (const m of methods) {
+            if (isEmbedExcluded(m.filePath, embedExclude)) continue;
+            if (getFileSize(join(project.path, m.filePath)) > MAX_EMBED_FILE_BYTES) continue;
             const startLine = m.lineNumber;
             const endLine = m.lineNumber + (m.bodyLines ?? 1) - 1;
             const identifiers = readMethodIdentifiers(handle!, m.filePath, startLine, endLine);
@@ -404,6 +434,8 @@ class RealEmbeddings implements EmbeddingsModule {
         // Types
         const types = readTypes(handle!);
         for (const t of types) {
+            if (isEmbedExcluded(t.filePath, embedExclude)) continue;
+            if (getFileSize(join(project.path, t.filePath)) > MAX_EMBED_FILE_BYTES) continue;
             const identifiers = readTypeIdentifiers(handle!, t.filePath, t.lineNumber);
             const chunk = chunkCode({
                 name: t.name,
@@ -527,6 +559,18 @@ class RealEmbeddings implements EmbeddingsModule {
         this.ensureSchema();
         const project = getProjectInfo(projectPath);
         if (!project) return; // Embeddings not enabled — no-op.
+
+        // If this file is excluded from embeddings, remove any existing embeddings for it.
+        const embedExclude = readAidexEmbedIgnore(projectPath);
+        if (isEmbedExcluded(filePath, embedExclude)) {
+            await deleteEmbeddingsByFile(project, filePath);
+            return;
+        }
+        // Skip files larger than the size limit — avoids ONNX OOM on large generated files.
+        if (getFileSize(join(projectPath, filePath)) > MAX_EMBED_FILE_BYTES) {
+            await deleteEmbeddingsByFile(project, filePath);
+            return;
+        }
 
         const handle = openProjectIndexDb(projectPath);
         if (!handle) return;
