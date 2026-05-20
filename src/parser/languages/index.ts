@@ -112,6 +112,14 @@ const configs: Record<SupportedLanguage, LanguageConfig> = {
         typeNodes: hcl.HCL_TYPE_NODES,
         propertyNodes: hcl.HCL_PROPERTY_NODES,
     },
+    astro: {
+        // Astro frontmatter is TypeScript; reuse TypeScript config
+        isKeyword: typescript.isKeyword,
+        identifierNodes: typescript.TYPESCRIPT_IDENTIFIER_NODES,
+        commentNodes: typescript.TYPESCRIPT_COMMENT_NODES,
+        methodNodes: typescript.TYPESCRIPT_METHOD_NODES,
+        typeNodes: typescript.TYPESCRIPT_TYPE_NODES,
+    },
 };
 
 /**

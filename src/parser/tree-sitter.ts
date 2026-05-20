@@ -19,13 +19,13 @@ import Hcl from '@tree-sitter-grammars/tree-sitter-hcl';
 
 export type SupportedLanguage =
     | 'csharp' | 'typescript' | 'javascript' | 'rust' | 'python'
-    | 'c' | 'cpp' | 'java' | 'go' | 'php' | 'ruby' | 'hcl';
+    | 'c' | 'cpp' | 'java' | 'go' | 'php' | 'ruby' | 'hcl' | 'astro';
 
 // Grammar packages export types incompatible with tree-sitter 0.25's Parser.Language interface.
 // All grammars work at runtime via NAPI — this is a type declaration mismatch only.
 const asLang = (grammar: unknown): Parser.Language => grammar as Parser.Language;
 
-// Maps each supported language (+ tsx/jsx virtual keys) to its tree-sitter grammar
+// Maps each supported language (+ tsx/jsx/astro virtual keys) to its tree-sitter grammar
 const GRAMMAR_MAP: Record<string, Parser.Language> = {
     csharp: asLang(CSharp),
     typescript: asLang(TypeScript.typescript),
@@ -41,6 +41,7 @@ const GRAMMAR_MAP: Record<string, Parser.Language> = {
     hcl: asLang(Hcl),
     tsx: asLang(TypeScript.tsx),
     jsx: asLang(TypeScript.tsx), // tsx grammar handles JSX too
+    astro: asLang(TypeScript.tsx), // parse extracted frontmatter as TSX
 };
 
 // File extension to language mapping
@@ -70,6 +71,7 @@ const EXTENSION_MAP: Record<string, SupportedLanguage> = {
     '.tf': 'hcl',
     '.tfvars': 'hcl',
     '.hcl': 'hcl',
+    '.astro': 'astro',
 };
 
 // Cached parsers per language (includes 'tsx' and 'jsx' as virtual keys)
@@ -127,18 +129,37 @@ export function parse(sourceCode: string, language: SupportedLanguage): Parser.T
 }
 
 /**
- * Get the grammar key for a file path (handles tsx/jsx separately)
+ * Extract TypeScript frontmatter from an Astro file.
+ * Astro frontmatter is the content between the opening and closing `---` fences.
+ * Returns the frontmatter source padded with blank lines to preserve original line numbers,
+ * or null if no frontmatter block is present.
+ */
+export function extractAstroFrontmatter(source: string): string | null {
+    const lines = source.split('\n');
+    if (lines[0]?.trimEnd() !== '---') return null;
+
+    const closeIdx = lines.indexOf('---', 1);
+    if (closeIdx === -1) return null;
+
+    // Keep frontmatter lines at their original positions; blank out everything else
+    const result = lines.map((line, i) => (i === 0 || i >= closeIdx ? '' : line));
+    return result.join('\n');
+}
+
+/**
+ * Get the grammar key for a file path (handles tsx/jsx/astro separately)
  */
 function getGrammarKey(filePath: string): string | null {
     const ext = filePath.substring(filePath.lastIndexOf('.')).toLowerCase();
     if (ext === '.tsx') return 'tsx';
     if (ext === '.jsx') return 'jsx';
+    if (ext === '.astro') return 'astro';
     const lang = detectLanguage(filePath);
     return lang;
 }
 
 /**
- * Get or create a parser for a specific grammar key (tsx, jsx, or SupportedLanguage)
+ * Get or create a parser for a specific grammar key (tsx, jsx, astro, or SupportedLanguage)
  */
 function getParserForGrammar(grammarKey: string): Parser {
     let parser = parsers.get(grammarKey);
@@ -163,6 +184,16 @@ export function parseFile(sourceCode: string, filePath: string): Parser.Tree | n
     if (!grammarKey) {
         return null;
     }
+
+    // For Astro files, parse only the TypeScript frontmatter (content between --- fences).
+    // Line numbers are preserved by keeping blank lines in place of the template content.
+    let codeToParse = sourceCode;
+    if (grammarKey === 'astro') {
+        const frontmatter = extractAstroFrontmatter(sourceCode);
+        if (!frontmatter) return null;
+        codeToParse = frontmatter;
+    }
+
     const parser = getParserForGrammar(grammarKey);
-    return parser.parse(sourceCode, undefined, { bufferSize: PARSE_BUFFER_SIZE });
+    return parser.parse(codeToParse, undefined, { bufferSize: PARSE_BUFFER_SIZE });
 }
