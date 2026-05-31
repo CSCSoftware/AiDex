@@ -2,6 +2,20 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [2.1.1] - 2026-05-31
+
+Bugfix release. C and C++ functions were silently dropped from the index — `aidex_signature` and `aidex_signatures` returned types but **zero methods** for every C/C++ file.
+
+### Fixed
+
+- **C/C++ function names were never extracted** (`src/parser/extractor.ts`): The generic method extractor only looked for a direct `identifier` child of a `function_definition` node. But the tree-sitter-c/c++ grammar never places the name there — it nests it under a declarator chain: `function_definition → (pointer_declarator)* → function_declarator → identifier`. As a result `name` stayed `null` and every function was discarded, so C/C++ files showed types but no methods at all.
+
+  **Fix**: A new `findCFunctionName()` helper walks the `declarator` field chain (through any number of `pointer_declarator` / `reference_declarator` wrappers) down to the `function_declarator` and reads the real name. Applied only on the `c` / `cpp` path — other languages are untouched.
+
+  Verified: `loghub_client.c` went from **0 → 11** functions extracted (including pointer-return functions like `uint8_t *slot_at(...)`); regression-tested against C#, TypeScript and C++ with no change to their output.
+
+  **Action required**: Already-indexed C/C++ projects keep the old (empty) result in their DB because the file hash is unchanged and won't auto-reindex. Force a re-index with `aidex_init` (or remove + update the affected files) to pick up the now-extracted functions.
+
 ## [2.1.0] - 2026-05-19
 
 Stability release. Two independent root causes that crashed the embedding pipeline in production — one silently killing the entire MCP server process, the other silently generating impossible memory allocations — are now both permanently prevented.

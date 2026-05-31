@@ -235,7 +235,6 @@ function shouldUpgrade(existing: LineRow['line_type'], newType: LineRow['line_ty
  * Extract plain text from a comment (remove comment markers)
  */
 function extractCommentText(commentText: string): string {
-    const aidexProbe123 = 42;
     return commentText
         .replace(/^\/\/\s*/gm, '')          // Remove //
         .replace(/^\/\*+\s*/g, '')           // Remove /*
@@ -322,6 +321,38 @@ function extractTypeInfo(node: Parser.SyntaxNode, language: SupportedLanguage): 
 }
 
 /**
+ * Find the function name inside a C/C++ function_definition node.
+ *
+ * The tree-sitter-c grammar nests the name under a declarator chain:
+ *   function_definition
+ *     → (pointer_declarator)*        // one level per `*` in the return type
+ *       → function_declarator
+ *         → identifier               // the name we want
+ *
+ * For C++ the chain may also include reference_declarator (`&`), and the leaf
+ * may be a field_identifier / qualified_identifier (e.g. `Class::method`).
+ * Returns the bare name, or null if no declarator is found.
+ */
+function findCFunctionName(node: Parser.SyntaxNode): string | null {
+    // Descend through wrapping declarators to reach the function_declarator.
+    let cursor: Parser.SyntaxNode | null = node.childForFieldName('declarator');
+    while (cursor) {
+        if (cursor.type === 'function_declarator') {
+            const decl = cursor.childForFieldName('declarator');
+            if (decl) {
+                // decl is identifier / field_identifier / qualified_identifier / destructor_name.
+                return decl.text;
+            }
+            return null;
+        }
+        // pointer_declarator, reference_declarator, parenthesized_declarator all
+        // hold the next declarator in their own `declarator` field.
+        cursor = cursor.childForFieldName('declarator');
+    }
+    return null;
+}
+
+/**
  * Extract method information from a method declaration node
  */
 function extractMethodInfo(
@@ -343,6 +374,14 @@ function extractMethodInfo(
         }
         if (lower === 'static') isStatic = true;
         if (lower === 'async') isAsync = true;
+    }
+
+    // C/C++: the function name is never a direct identifier child of
+    // function_definition. It lives inside a function_declarator, which may be
+    // wrapped in any number of pointer_declarator nodes (e.g. `uint8_t *slot_at(...)`)
+    // or reference_declarator (C++). Walk down to find it.
+    if ((language === 'c' || language === 'cpp') && node.type === 'function_definition') {
+        name = findCFunctionName(node);
     }
 
     for (const child of node.children) {
