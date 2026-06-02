@@ -1126,6 +1126,9 @@ function escapeHtml(str: string): string {
 
 function getViewerHTML(projectPath: string): string {
     const projectName = escapeHtml(path.basename(projectPath));
+    // Absolute, copy-paste-safe demo command (relative paths fail from other dirs).
+    const demoScript = path.join(path.resolve(projectPath), 'scripts', 'demo-dashboard.mjs');
+    const demoCommandJson = JSON.stringify(`node "${demoScript}"`);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -2196,12 +2199,17 @@ function getViewerHTML(projectPath: string): string {
             background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border);
         }
         .widget-plot-stats {
-            display: flex; gap: 10px; flex-wrap: nowrap; overflow: hidden; margin-top: 4px;
+            display: flex; gap: 12px; flex-wrap: nowrap; overflow: hidden; margin-top: 4px;
             height: 1.1em; line-height: 1.1em;   /* fixed height — never reflows on value change */
             font-family: ui-monospace, monospace; font-size: 0.72em; color: var(--text-secondary);
         }
-        .widget-plot-stats span { white-space: nowrap; flex: 1 1 0; min-width: 0; }
-        .widget-plot-stats span:first-child { color: var(--accent-cyan); }
+        /* Each cell = dimmed key + value. min-width:0 + ellipsis means a wide value
+           (e.g. "-19.71 dB") clips instead of running into the next cell. */
+        .pstat { display: flex; align-items: baseline; gap: 4px; flex: 1 1 0; min-width: 0; white-space: nowrap; }
+        .pstat:first-child { flex: 1.4 1 0; }   /* cur carries the unit — give it room */
+        .pstat-k { color: var(--text-muted); }
+        .pstat-v { overflow: hidden; text-overflow: ellipsis; }
+        .widget-plot-stats .pstat:first-child .pstat-v { color: var(--accent-cyan); }
 
         @keyframes widget-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
         @keyframes value-flash { 0% { color: #fff; text-shadow: 0 0 16px #fff; } 100% {} }
@@ -2666,11 +2674,14 @@ function getViewerHTML(projectPath: string): string {
             const avg = data.reduce((a, b) => a + b, 0) / data.length;
             const stat = document.getElementById('pstat-' + cssId(w.id));
             if (stat) {
+                const unit = w.unit ? ' ' + escapeHtml(w.unit) : '';
+                const cell = (k, v) => '<span class="pstat"><span class="pstat-k">' + k + '</span>' +
+                    '<span class="pstat-v">' + v + '</span></span>';
                 stat.innerHTML =
-                    '<span>cur ' + fmtNum(w.value) + (w.unit ? ' ' + escapeHtml(w.unit) : '') + '</span>' +
-                    '<span>min ' + fmtNum(Math.min(...data)) + '</span>' +
-                    '<span>max ' + fmtNum(Math.max(...data)) + '</span>' +
-                    '<span>avg ' + fmtNum(avg) + '</span>';
+                    cell('cur', fmtNum(w.value) + unit) +
+                    cell('min', fmtNum(Math.min(...data))) +
+                    cell('max', fmtNum(Math.max(...data))) +
+                    cell('avg', fmtNum(avg));
             }
         }
 
@@ -2757,7 +2768,7 @@ function getViewerHTML(projectPath: string): string {
         // The browser can't spawn a node process, so the Demo button copies the
         // command to the clipboard — paste it into a terminal to run the showcase.
         function copyDemoCommand(btn) {
-            const cmd = 'node scripts/demo-dashboard.mjs';
+            const cmd = ${demoCommandJson};
             const orig = btn.textContent;
             const done = () => { btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = orig; }, 1800); };
             const fail = () => { btn.textContent = cmd; setTimeout(() => { btn.textContent = orig; }, 4000); };
