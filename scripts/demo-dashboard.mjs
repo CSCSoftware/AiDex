@@ -121,10 +121,23 @@ function update() {
     panel({ id: 'diskio', value: +(slow(5) * 80 + (Math.random() < 0.06 ? 200 : 0) + Math.random() * 10).toFixed(1) });
     panel({ id: 'uptime', value: tick * (TICK_MS / 1000) | 0 });
 
-    // Signal generator: switch waveform every 5s, draw ~3 periods across the window.
-    const kind = WAVEFORMS[Math.floor(t / 5) % WAVEFORMS.length];
-    panel({ id: 'siggen', value: +waveform(kind, (t * 3) % 1).toFixed(3) });
-    if (tick % 8 === 0) panel({ id: 'sigform', value: kind });
+    // Signal generator: hold each waveform 6s, then send the WHOLE curve as one
+    // array frame (2.5 clean cycles, 150 samples). Sending the full frame avoids
+    // both aliasing (plenty of points per cycle) and the messy mix you'd get if
+    // the old waveform's samples lingered in the ring during a switch — the new
+    // shape replaces the plot wholesale, so sine/sawtooth/triangle/square each
+    // render crisply and distinctly.
+    const kind = WAVEFORMS[Math.floor(t / 6) % WAVEFORMS.length];
+    if (tick % 4 === 0) {                 // refresh the frame a few times/sec (cheap)
+        const CYCLES = 2.5, N = 150;
+        const drift = (t * 0.5) % 1;      // slow horizontal scroll so it looks alive
+        const frame = [];
+        for (let i = 0; i < N; i++) {
+            frame.push(+waveform(kind, ((i / N) * CYCLES + drift) % 1).toFixed(3));
+        }
+        panel({ id: 'siggen', value: frame });
+        panel({ id: 'sigform', value: kind });
+    }
 }
 
 async function main() {
