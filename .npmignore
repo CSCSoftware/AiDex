@@ -32,8 +32,18 @@ AiDex_Article_English.pdf
 docs/MARKETING.md
 docs/MARKETING-PLAN.md
 
-# Scripts
+# Scripts — exclude all dev/test/forensic/demo helpers, but KEEP the
+# postinstall hook (package.json "postinstall" runs it on every `npm install`).
 *.bat
+scripts/*
+!scripts/postinstall.mjs
+
+# Tests (dev only)
+tests/
+
+# Logs and tool output
+*.log
+scripts/forensic-2026-05-22/
 
 # Generated HTML
 *.html
