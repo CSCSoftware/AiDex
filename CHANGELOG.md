@@ -2,19 +2,28 @@
 
 All notable changes to AiDex will be documented in this file.
 
-## [Unreleased]
+## [2.1.2] - 2026-06-02
+
+Feature + stability release. Adds the live **Debug Dashboard** and closes the WebSocket memory leak the v2.1.0/2.1.1 fixes had missed.
 
 ### Added
 
 - **Debug Dashboard (Panel API)** — a live, fixed-slot dashboard alongside the scrolling log stream. External programs `POST /panel` with `{ id, type, value, group? }`; sending the same `id` again **overwrites the value in place** instead of scrolling away. Built for high-frequency / repeated values (audio levels, buffer fill, FPS, sensors).
   - Four widget types: **label**, **progress** (with warn/crit threshold colouring), **gauge** (radial tachometer in the MSI Afterburner / ASUS GPU Tweak style, or a pulsing status LED for string values), and **plot** (real-time line graph in the HWiNFO style with grid + min/max/avg).
-  - Endpoints `POST /panel`, `POST /panels` (batch), `POST /panel/clear`. The server keeps the last state per `id`, so a freshly-connected or reloaded viewer gets the full dashboard snapshot immediately; cards with no update for ~3 s grey out as "stale".
+  - Endpoints `POST /panel`, `POST /panels` (batch), `POST /panel/clear`. The server keeps the last state per `id`, so a freshly-connected or reloaded viewer gets the full dashboard snapshot immediately; cards with no update for ~3 s grey out as "stale". **Clear** is a full reset — a source reappears only if it re-sends widgets with their `type`.
   - New Viewer **Debug** tab (Tokyo-Night cockpit look). Plots are redrawn on a single `requestAnimationFrame` tick so audio-rate updates stay smooth. All panel broadcasts use the WS backpressure guard.
-  - New files: `src/loghub/panel-types.ts`, `src/loghub/panel-store.ts`. Smoke test: `scripts/test-panel.mjs`.
+  - New files: `src/loghub/panel-types.ts`, `src/loghub/panel-store.ts`.
+- **Showcase demo** (`scripts/demo-dashboard.mjs`) — an endless animation of all widget types (audio waveform, GPU gauges drifting through their zones, a signal generator cycling sine → sawtooth → triangle → square, latency spikes). A **▷ Demo** button on the Debug tab copies the run command to the clipboard. Launcher: `scripts/demo-dashboard.ps1`.
 
 ### Fixed
 
 - **WebSocket backpressure leak in `broadcastTreeUpdate`** (`src/viewer/server.ts`): the v2.1.0 fix added a `bufferedAmount` guard to `broadcastLogEntry` and `broadcastTaskUpdate`, but `broadcastTreeUpdate` still called `client.send()` with no guard. On actively-changing projects (chokidar fires continuously while files churn) it broadcast full code + all trees (~0.5 MB/frame); a slow viewer client let ws's internal send-queue grow without bound → **50+ GB committed**. This was the dominant leak the v2.1.0 fix missed. The same guard (drop + `wsDropCounts` + rate-limited stderr) is now applied to `broadcastTreeUpdate` and `broadcastFocusTab`. Proof: `scripts/test-tree-backpressure.mjs` — unguarded 2559 MB buffered, guarded 1 MB.
+- **Dashboard layout flicker**: latency spikes / growing numbers made plot-stats wrap and value rows widen, changing card height and reflowing every card below. Plot-stats are now fixed-height `nowrap` cells, value rows are `nowrap`, and the grid uses a stable `grid-auto-rows` baseline.
+- **Plot-stats overlap**: a `cur` value with its unit (e.g. `-19.71 dB`) ran into the next stat. Stats are now key+value cells with a fixed gap; long values clip with an ellipsis instead of colliding.
+
+### Tests
+
+- `scripts/test-panel-store.mjs` (25 checks: validation, all widget types, plot ring + array frames + NaN filter + caps, snapshot, clear) and `scripts/test-panel-http.mjs` (8 checks: endpoints + error handling) cover the new panel layer. Backpressure proofs: `scripts/test-backpressure.mjs`, `scripts/test-tree-backpressure.mjs`.
 
 ## [2.1.1] - 2026-05-31
 
