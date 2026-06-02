@@ -61,6 +61,22 @@ async function defineWidgets() {
     await panel({ id: 'ram',    type: 'progress', group: 'System', label: 'RAM',      unit: 'GB', min: 0, max: 64, warn: 48, crit: 58, order: 1 });
     await panel({ id: 'diskio', type: 'plot',     group: 'System', label: 'Disk I/O', color: 'green', unit: 'MB/s', order: 2 });
     await panel({ id: 'uptime', type: 'label',    group: 'System', label: 'Uptime',   color: 'cyan', unit: 's', order: 3 });
+
+    // --- Signals: a clean waveform generator cycling through shapes ---
+    await panel({ id: 'siggen', type: 'plot',  group: 'Signals', label: 'Signal Gen', color: 'purple', order: 0 });
+    await panel({ id: 'sigform', type: 'label', group: 'Signals', label: 'Waveform',   color: 'purple', order: 1 });
+}
+
+// Clean periodic waveforms in [-1, 1]. `p` is the phase fraction 0..1.
+const WAVEFORMS = ['sine', 'sawtooth', 'triangle', 'square'];
+function waveform(kind, p) {
+    switch (kind) {
+        case 'sine':     return Math.sin(p * Math.PI * 2);
+        case 'sawtooth': return 2 * (p - Math.floor(p + 0.5));
+        case 'triangle': return 2 * Math.abs(2 * (p - Math.floor(p + 0.5))) - 1;
+        case 'square':   return (p % 1) < 0.5 ? 1 : -1;
+        default:         return 0;
+    }
 }
 
 function update() {
@@ -104,6 +120,11 @@ function update() {
     panel({ id: 'ram', value: +(20 + slow(29) * 38).toFixed(1) });
     panel({ id: 'diskio', value: +(slow(5) * 80 + (Math.random() < 0.06 ? 200 : 0) + Math.random() * 10).toFixed(1) });
     panel({ id: 'uptime', value: tick * (TICK_MS / 1000) | 0 });
+
+    // Signal generator: switch waveform every 5s, draw ~3 periods across the window.
+    const kind = WAVEFORMS[Math.floor(t / 5) % WAVEFORMS.length];
+    panel({ id: 'siggen', value: +waveform(kind, (t * 3) % 1).toFixed(3) });
+    if (tick % 8 === 0) panel({ id: 'sigform', value: kind });
 }
 
 async function main() {

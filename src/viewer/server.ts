@@ -2511,6 +2511,7 @@ function getViewerHTML(projectPath: string): string {
             html += '<div class="debug-toolbar">';
             html += '<h2>Debug Dashboard</h2>';
             html += '<div class="debug-actions">';
+            html += '<button class="debug-btn" onclick="copyDemoCommand(this)" title="Copy the demo command to your clipboard, then paste it into a terminal">▷ Demo</button>';
             html += '<button class="debug-btn" onclick="toggleDebugPause(this)">' + (debugPaused ? '▶ Resume' : '⏸ Pause') + '</button>';
             html += '<button class="debug-btn" onclick="clearDebugDashboard()">✕ Clear</button>';
             html += '</div></div>';
@@ -2744,6 +2745,24 @@ function getViewerHTML(projectPath: string): string {
             panelWidgets.clear();
             fetch('http://localhost:3335/panel/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
             renderDebugTab();
+        }
+
+        // The browser can't spawn a node process, so the Demo button copies the
+        // command to the clipboard — paste it into a terminal to run the showcase.
+        function copyDemoCommand(btn) {
+            const cmd = 'node scripts/demo-dashboard.mjs';
+            const orig = btn.textContent;
+            const done = () => { btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = orig; }, 1800); };
+            const fail = () => { btn.textContent = cmd; setTimeout(() => { btn.textContent = orig; }, 4000); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(cmd).then(done).catch(fail);
+            } else {
+                // Fallback for non-secure contexts.
+                const ta = document.createElement('textarea');
+                ta.value = cmd; document.body.appendChild(ta); ta.select();
+                try { document.execCommand('copy'); done(); } catch (e) { fail(); }
+                document.body.removeChild(ta);
+            }
         }
 
         function renderTree(node, container = document.getElementById('tree'), depth = 0) {
