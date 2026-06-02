@@ -15,9 +15,8 @@ CODEGRAPH-SPEC.md
 IMPLEMENTATION-PLAN.md
 CODE-REVIEW.md
 FUTURE.md
-docs/posts/
-docs/*.gif
-docs/*.png
+docs/
+CHANGELOG.md
 
 # Secrets / Tokens
 .*token*
