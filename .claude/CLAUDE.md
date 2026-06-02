@@ -391,6 +391,78 @@ Invoke-RestMethod -Uri "http://localhost:3335/log" -Method POST -ContentType "ap
 - **Fire & Forget** — Logs asynchron senden (kein await nötig), damit die App nicht blockiert
 - **Kein Error-Handling nötig** — wenn LogHub nicht läuft, schlägt der POST still fehl
 
+## Debug-Dashboard (Panel-API)
+
+Neben dem scrollenden Log-Stream gibt es ein **Live-Dashboard** mit festen Slots: jeder Wert hat eine `id`, ein erneutes Senden derselben `id` **überschreibt den Wert in-place** statt wegzuscrollen. Ideal für hochfrequente / wiederholte Werte (Audio-Pegel, Buffer-Füllung, FPS, Sensoren). Sichtbar im Viewer-**Debug-Tab**.
+
+### HTTP API
+
+| Endpoint | Method | Body | Beschreibung |
+|----------|--------|------|--------------|
+| `/panel` | POST | `{ id, type, value, group?, ... }` | Einzelnes Widget setzen/aktualisieren |
+| `/panels` | POST | `[{ ... }, ...]` | Batch |
+| `/panel/clear` | POST | `{ id? }` | Ein Widget (id) oder alle (leer) entfernen |
+
+### Widget-Felder
+
+- `id` (Pflicht) — fester Slot-Key; gleiche id = Überschreiben
+- `type` (Pflicht bei Erst-Anlage) — `label` · `progress` · `gauge` · `plot`
+- `value` — typabhängig: Zahl, String (für gauge-Status `"ok"`/`"warn"`/`"error"`), oder Zahl-Array (plot: ganzer Frame)
+- `group` — Sektion im Dashboard (default `"Default"`)
+- `label` — Anzeigename (default = id)
+- `unit` — Einheit (z.B. `"dB"`, `"°C"`, `"fps"`)
+- `min` / `max` — Skala für progress/gauge (default 0..100)
+- `warn` / `crit` — Schwellen → Färbung grün/gelb/rot (gauge/progress)
+- `color` — Akzent: `cyan`/`blue`/`green`/`orange`/`purple`/`yellow`/`red` oder Hex
+- `order` — Sortierung innerhalb der Gruppe
+
+### Widget-Typen
+
+- **label** — großer Wert + Einheit, in-place überschrieben
+- **progress** — Balken (min..max), mit Schwellwert-Färbung (warn/crit)
+- **gauge** — bei Zahl: radiales Tacho (Afterburner-Stil) mit Zonen-Färbung; bei Status-String: pulsierende LED (grün/gelb/rot)
+- **plot** — Echtzeit-Liniengraph (HWiNFO-Stil) mit Gitternetz + min/max/avg. Einzel-Sample (`value: 0.7`) wird an einen Verlauf (200 Werte) angehängt; ein Array ersetzt den ganzen Verlauf.
+
+### Lifecycle
+
+- Server hält den letzten Zustand pro `id` → ein neu verbundener/neugeladener Browser bekommt sofort den kompletten Snapshot.
+- Karten ohne Update seit ~3 s werden visuell „stale" (ausgegraut).
+- Backpressure-geschützt: ein langsamer Browser-Client lässt die Send-Queue nicht volllaufen (Frames werden gedroppt, kein Memory-Leak).
+
+### Code-Beispiele
+
+**PowerShell**
+```powershell
+Invoke-RestMethod -Uri "http://localhost:3335/panel" -Method POST -ContentType "application/json" `
+  -Body '{"id":"mic_level","type":"plot","value":0.73,"group":"Audio","label":"Mic Level","unit":"dB"}'
+```
+
+**C# (Minimal-Helper)**
+```csharp
+static readonly HttpClient _hub = new();
+static void Panel(string id, string type, object value, string group = "Default", object? extra = null) {
+    var body = new { id, type, value, group };
+    _ = _hub.PostAsJsonAsync("http://localhost:3335/panel", body);
+}
+Panel("buffer", "progress", 82, "Engine");      // value überschreibt in-place
+Panel("state",  "gauge",    "ok", "Engine");     // LED-Status
+```
+
+**Python**
+```python
+import requests
+requests.post("http://localhost:3335/panel", json={
+    "id": "gpu_temp", "type": "gauge", "value": 67, "min": 0, "max": 100,
+    "unit": "°C", "warn": 75, "crit": 90, "group": "Hardware", "label": "GPU Temp"
+})
+```
+
+**C / ESP32 (curl-Stil)**
+```c
+// POST http://localhost:3335/panel  Body: {"id":"audio","type":"plot","value":0.42,"group":"Audio"}
+// Einzel-Sample je Frame senden — der Server baut den Verlauf, der Viewer plottet flüssig.
+```
+
 ## Dokumentation
 
 | Datei | Inhalt |

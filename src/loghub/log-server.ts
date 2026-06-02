@@ -13,8 +13,10 @@ import { join, isAbsolute, dirname } from 'path';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import BetterSqlite3 from 'better-sqlite3';
 import { LogBuffer } from './log-buffer.js';
-import { broadcastLogEntry } from '../viewer/server.js';
+import { PanelStore } from './panel-store.js';
+import { broadcastLogEntry, broadcastPanelUpdate, broadcastPanelClear } from '../viewer/server.js';
 import type { LogEntry, LogLevel, LogConfig, LogStats, LogHttpEntry } from './log-types.js';
+import type { PanelHttpEntry } from './panel-types.js';
 
 const VALID_LEVELS = new Set<string>(['debug', 'info', 'warn', 'error']);
 const BODY_LIMIT = '64kb';
@@ -35,6 +37,7 @@ const blobs = new Map<string, BlobInProgress>();
 let logServer: Server | null = null;
 let logBuffer: LogBuffer | null = null;
 let logConfig: LogConfig | null = null;
+let panelStore: PanelStore | null = null;
 
 // Optional DB persistence
 let logDb: BetterSqlite3.Database | null = null;
@@ -50,6 +53,7 @@ export function initLogHub(config: LogConfig): Promise<string> {
 
     logBuffer = new LogBuffer(config.bufferSize);
     logConfig = config;
+    panelStore = new PanelStore();
 
     // Optional DB persistence
     if (config.persist && config.path) {
@@ -102,6 +106,41 @@ export function initLogHub(config: LogConfig): Promise<string> {
             if (entry) ids.push(entry.id);
         }
         res.status(201).json({ count: ids.length, ids });
+    });
+
+    // POST /panel — create/update a single dashboard widget (overwrites by id).
+    //   body: { id, type, value, group?, label?, unit?, min?, max?, warn?, crit?, color?, order? }
+    app.post('/panel', (req, res) => {
+        const widget = ingestPanel(req.body as PanelHttpEntry);
+        if (!widget) {
+            res.status(400).json({ error: 'Invalid panel widget. Required: id, and type (on first update)' });
+            return;
+        }
+        res.status(201).json({ id: widget.id });
+    });
+
+    // POST /panels — batch widget updates.
+    app.post('/panels', (req, res) => {
+        const bodies = req.body as PanelHttpEntry[];
+        if (!Array.isArray(bodies)) {
+            res.status(400).json({ error: 'Expected array of panel widgets' });
+            return;
+        }
+        const ids: string[] = [];
+        for (const body of bodies) {
+            const widget = ingestPanel(body);
+            if (widget) ids.push(widget.id);
+        }
+        res.status(201).json({ count: ids.length, ids });
+    });
+
+    // POST /panel/clear — remove one widget ({ id }) or all (empty body).
+    app.post('/panel/clear', (req, res) => {
+        const body = (req.body ?? {}) as { id?: string };
+        const id = typeof body.id === 'string' ? body.id : undefined;
+        if (panelStore) panelStore.clear(id);
+        broadcastPanelClear(id);
+        res.status(200).json({ cleared: id ?? 'all' });
     });
 
     // POST /blob — assemble a binary file from base64 chunks.
@@ -224,6 +263,7 @@ export function freeLogHub(): string {
     const port = logConfig!.port;
     logBuffer = null;
     logConfig = null;
+    panelStore = null;
 
     console.error('[LogHub] Server stopped');
     return `Log Hub stopped (port ${port} freed)`;
@@ -241,6 +281,13 @@ export function isLogHubRunning(): boolean {
  */
 export function getLogBuffer(): LogBuffer | null {
     return logBuffer;
+}
+
+/**
+ * Get the panel store (for the viewer's snapshot-on-connect)
+ */
+export function getPanelStore(): PanelStore | null {
+    return panelStore;
 }
 
 /**
@@ -291,6 +338,14 @@ function ingestEntry(body: LogHttpEntry): LogEntry | null {
     persistEntry(entry);
     broadcastLogEntry(entry);
     return entry;
+}
+
+function ingestPanel(body: PanelHttpEntry) {
+    if (!panelStore) return null;
+    const widget = panelStore.upsert(body);
+    if (!widget) return null;
+    broadcastPanelUpdate(widget);
+    return widget;
 }
 
 function persistEntry(entry: LogEntry): void {

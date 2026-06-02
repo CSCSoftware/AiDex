@@ -2,6 +2,20 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Debug Dashboard (Panel API)** — a live, fixed-slot dashboard alongside the scrolling log stream. External programs `POST /panel` with `{ id, type, value, group? }`; sending the same `id` again **overwrites the value in place** instead of scrolling away. Built for high-frequency / repeated values (audio levels, buffer fill, FPS, sensors).
+  - Four widget types: **label**, **progress** (with warn/crit threshold colouring), **gauge** (radial tachometer in the MSI Afterburner / ASUS GPU Tweak style, or a pulsing status LED for string values), and **plot** (real-time line graph in the HWiNFO style with grid + min/max/avg).
+  - Endpoints `POST /panel`, `POST /panels` (batch), `POST /panel/clear`. The server keeps the last state per `id`, so a freshly-connected or reloaded viewer gets the full dashboard snapshot immediately; cards with no update for ~3 s grey out as "stale".
+  - New Viewer **Debug** tab (Tokyo-Night cockpit look). Plots are redrawn on a single `requestAnimationFrame` tick so audio-rate updates stay smooth. All panel broadcasts use the WS backpressure guard.
+  - New files: `src/loghub/panel-types.ts`, `src/loghub/panel-store.ts`. Smoke test: `scripts/test-panel.mjs`.
+
+### Fixed
+
+- **WebSocket backpressure leak in `broadcastTreeUpdate`** (`src/viewer/server.ts`): the v2.1.0 fix added a `bufferedAmount` guard to `broadcastLogEntry` and `broadcastTaskUpdate`, but `broadcastTreeUpdate` still called `client.send()` with no guard. On actively-changing projects (chokidar fires continuously while files churn) it broadcast full code + all trees (~0.5 MB/frame); a slow viewer client let ws's internal send-queue grow without bound → **50+ GB committed**. This was the dominant leak the v2.1.0 fix missed. The same guard (drop + `wsDropCounts` + rate-limited stderr) is now applied to `broadcastTreeUpdate` and `broadcastFocusTab`. Proof: `scripts/test-tree-backpressure.mjs` — unguarded 2559 MB buffered, guarded 1 MB.
+
 ## [2.1.1] - 2026-05-31
 
 Bugfix release. C and C++ functions were silently dropped from the index — `aidex_signature` and `aidex_signatures` returned types but **zero methods** for every C/C++ file.

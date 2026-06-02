@@ -285,6 +285,16 @@ export async function startViewer(projectPath: string, initialTab?: string, opti
             }, 50);
         }
 
+        // Send the current debug-dashboard snapshot so a freshly-connected (or
+        // reloaded) browser shows all live widgets immediately. Dynamic import
+        // avoids a top-level cycle (log-server already imports from this file).
+        import('../loghub/log-server.js').then(({ getPanelStore }) => {
+            const store = getPanelStore();
+            if (store && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'panelSnapshot', widgets: store.snapshot() }));
+            }
+        }).catch(() => { /* loghub not running — no dashboard yet */ });
+
         ws.on('message', async (data: Buffer) => {
             try {
                 const msg: ViewerMessage = JSON.parse(data.toString());
@@ -615,6 +625,40 @@ export function broadcastLogEntry(entry: import('../loghub/log-types.js').LogEnt
             }
             return;
         }
+        client.send(payload);
+    });
+}
+
+/**
+ * Broadcast a single debug-dashboard widget update. Same backpressure guard as
+ * the log path — plot widgets can fire at audio rates, so a slow client must
+ * not be allowed to back up ws's internal send-queue.
+ */
+export function broadcastPanelUpdate(widget: import('../loghub/panel-types.js').PanelWidget): void {
+    if (!wss) return;
+
+    const payload = JSON.stringify({ type: 'panel', widget });
+    wss.clients.forEach((client) => {
+        if (client.readyState !== WebSocket.OPEN) return;
+        if (client.bufferedAmount > WS_BACKPRESSURE_BYTES) {
+            const dropped = (wsDropCounts.get(client) ?? 0) + 1;
+            wsDropCounts.set(client, dropped);
+            if (dropped === 1 || dropped % 1000 === 0) {
+                console.error(`[Viewer] WS backpressure — dropped ${dropped} panel frame(s) for slow client (buffered=${client.bufferedAmount})`);
+            }
+            return;
+        }
+        client.send(payload);
+    });
+}
+
+/** Broadcast a widget removal (id) or full dashboard clear (no id). */
+export function broadcastPanelClear(id?: string): void {
+    if (!wss) return;
+    const payload = JSON.stringify({ type: 'panelClear', id: id ?? null });
+    wss.clients.forEach((client) => {
+        if (client.readyState !== WebSocket.OPEN) return;
+        if (client.bufferedAmount > WS_BACKPRESSURE_BYTES) return; // rare, just skip
         client.send(payload);
     });
 }
@@ -2042,6 +2086,119 @@ function getViewerHTML(projectPath: string): string {
             line-height: 1.5;
         }
         .settings-update-banner strong { color: var(--accent-cyan); }
+
+        /* ===== Debug Dashboard ===== */
+        .debug-container { padding: 16px 20px; }
+        .debug-toolbar {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 18px; padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .debug-toolbar h2 {
+            margin: 0; font-size: 1.15em; letter-spacing: 0.04em;
+            color: var(--text-primary); text-transform: uppercase;
+        }
+        .debug-actions { display: flex; gap: 8px; }
+        .debug-btn {
+            background: var(--bg-tertiary); color: var(--text-secondary);
+            border: 1px solid var(--border); border-radius: 6px;
+            padding: 5px 12px; font-size: 0.8em; cursor: pointer;
+            font-family: inherit; transition: all 0.15s;
+        }
+        .debug-btn:hover { color: var(--accent); border-color: var(--accent); }
+        .debug-container .hint { color: var(--text-muted); font-size: 0.85em; margin-top: 8px; }
+        .debug-container .hint code {
+            background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px;
+            color: var(--accent-cyan); font-size: 0.95em;
+        }
+
+        .debug-group { margin-bottom: 22px; }
+        .debug-group-header {
+            font-size: 0.72em; font-weight: 700; letter-spacing: 0.14em;
+            text-transform: uppercase; color: var(--text-muted);
+            margin-bottom: 10px; padding-left: 2px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .debug-group-header::after {
+            content: ''; flex: 1; height: 1px;
+            background: linear-gradient(90deg, var(--border), transparent);
+        }
+        .debug-grid {
+            display: grid; gap: 12px;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+        }
+
+        .widget-card {
+            position: relative; background: var(--bg-secondary);
+            border: 1px solid var(--border); border-radius: 10px;
+            padding: 12px 14px 12px 16px; overflow: hidden;
+            animation: widget-in 0.25s ease-out;
+            transition: box-shadow 0.2s, opacity 0.3s, border-color 0.2s;
+        }
+        .widget-card::before {
+            content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+            background: var(--w-accent, var(--accent-cyan));
+            box-shadow: 0 0 8px var(--w-accent, var(--accent-cyan));
+        }
+        .widget-card:hover {
+            border-color: var(--w-accent, var(--accent));
+            box-shadow: 0 0 0 1px var(--w-accent, var(--accent)),
+                        0 4px 18px -6px var(--w-accent, var(--accent));
+        }
+        .widget-card.stale { opacity: 0.5; }
+        .widget-card.stale::before { background: var(--text-muted); box-shadow: none; }
+
+        .widget-label {
+            font-size: 0.72em; letter-spacing: 0.06em; text-transform: uppercase;
+            color: var(--text-muted); margin-bottom: 8px;
+        }
+        .widget-body { display: flex; flex-direction: column; gap: 6px; }
+        .widget-value-row { display: flex; align-items: baseline; gap: 6px; }
+        .widget-value {
+            font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+            font-size: 1.7em; font-weight: 600; line-height: 1;
+            color: var(--accent-cyan); text-shadow: 0 0 12px rgba(125,207,255,0.35);
+        }
+        .widget-unit { font-size: 0.85em; color: var(--text-muted); }
+        .widget-pct { margin-left: auto; font-size: 0.85em; color: var(--text-secondary); font-family: ui-monospace, monospace; }
+        .value-flash { animation: value-flash 0.4s ease-out; }
+
+        .widget-progress {
+            height: 8px; background: var(--bg-primary); border-radius: 5px;
+            overflow: hidden; border: 1px solid var(--border);
+        }
+        .widget-progress-fill {
+            height: 100%; border-radius: 5px; transition: width 0.25s ease, background 0.25s;
+            box-shadow: 0 0 8px currentColor;
+        }
+
+        .widget-led-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+        .widget-led {
+            width: 14px; height: 14px; border-radius: 50%;
+            background: var(--led, var(--accent-green));
+            box-shadow: 0 0 10px var(--led, var(--accent-green)), 0 0 2px var(--led);
+            animation: led-pulse 2s ease-in-out infinite;
+        }
+        .widget-led-text {
+            font-family: ui-monospace, monospace; font-size: 1.1em;
+            text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-primary);
+        }
+
+        .widget-gauge-canvas { width: 100%; height: auto; display: block; }
+        .widget-plot-canvas {
+            width: 100%; height: auto; display: block;
+            background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border);
+        }
+        .widget-plot-stats {
+            display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px;
+            font-family: ui-monospace, monospace; font-size: 0.7em; color: var(--text-muted);
+        }
+        .widget-plot-stats span { white-space: nowrap; }
+        .widget-plot-stats span:first-child { color: var(--accent-cyan); }
+
+        @keyframes widget-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        @keyframes value-flash { 0% { color: #fff; text-shadow: 0 0 16px #fff; } 100% {} }
+        @keyframes led-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.65; } }
     </style>
 </head>
 <body>
@@ -2067,6 +2224,7 @@ function getViewerHTML(projectPath: string): string {
                 <div class="tab" data-tab="source">Code</div>
                 <div class="tab" data-tab="tasks">Tasks</div>
                 <div class="tab" data-tab="logs">Logs</div>
+                <div class="tab" data-tab="debug">Debug</div>
                 <div class="tab" data-tab="search">Search</div>
                 <div class="tab" data-tab="settings">Settings</div>
             </div>
@@ -2182,6 +2340,12 @@ function getViewerHTML(projectPath: string): string {
                 }
             } else if (msg.type === 'log') {
                 handleLogEntry(msg.entry);
+            } else if (msg.type === 'panelSnapshot') {
+                handlePanelSnapshot(msg.widgets);
+            } else if (msg.type === 'panel') {
+                upsertPanelWidget(msg.widget);
+            } else if (msg.type === 'panelClear') {
+                handlePanelClear(msg.id);
             } else if (msg.type === 'searchResults') {
                 handleSearchResults(msg);
             } else if (msg.type === 'settings') {
@@ -2242,6 +2406,8 @@ function getViewerHTML(projectPath: string): string {
                     }
                 } else if (currentDetailTab === 'logs') {
                     renderLogView();
+                } else if (currentDetailTab === 'debug') {
+                    renderDebugTab();
                 } else if (currentDetailTab === 'search') {
                     renderSearchTab();
                 } else if (currentDetailTab === 'settings') {
@@ -2249,6 +2415,336 @@ function getViewerHTML(projectPath: string): string {
                 }
             });
         });
+
+        // ============================================================
+        // Debug Dashboard — live widgets, fixed slots, overwrite in place
+        // ============================================================
+        let panelWidgets = new Map();      // id -> widget state
+        let debugViewInitialized = false;
+        let debugPaused = false;
+        const plotDirty = new Set();       // ids whose plot canvas needs redraw
+        let rafScheduled = false;
+        const STALE_MS = 3000;
+        const PLOT_HISTORY = 200;
+
+        // Map an accent name (or hex) to a CSS color. Falls back to cyan.
+        const ACCENT_MAP = {
+            cyan: getCss('--accent-cyan'), blue: getCss('--accent'), green: getCss('--accent-green'),
+            orange: getCss('--accent-orange'), purple: getCss('--accent-purple'),
+            yellow: getCss('--accent-yellow'), red: getCss('--accent-red'),
+        };
+        function getCss(varName) {
+            return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#7dcfff';
+        }
+        function widgetColor(w) {
+            if (!w.color) return ACCENT_MAP.cyan;
+            if (w.color[0] === '#') return w.color;
+            return ACCENT_MAP[w.color] || ACCENT_MAP.cyan;
+        }
+        // Threshold color for gauge/progress: green < warn < yellow < crit < red.
+        function zoneColor(w, val) {
+            const max = w.max != null ? w.max : 100;
+            const warn = w.warn != null ? w.warn : max * 0.7;
+            const crit = w.crit != null ? w.crit : max * 0.9;
+            if (val >= crit) return ACCENT_MAP.red;
+            if (val >= warn) return ACCENT_MAP.yellow;
+            return ACCENT_MAP.green;
+        }
+
+        function handlePanelSnapshot(widgets) {
+            panelWidgets = new Map();
+            (widgets || []).forEach(w => panelWidgets.set(w.id, w));
+            if (currentDetailTab === 'debug') renderDebugTab();
+        }
+        function handlePanelClear(id) {
+            if (id) panelWidgets.delete(id);
+            else panelWidgets.clear();
+            if (currentDetailTab === 'debug') renderDebugTab();
+        }
+
+        function upsertPanelWidget(w) {
+            if (!w || !w.id) return;
+            const existed = panelWidgets.has(w.id);
+            panelWidgets.set(w.id, w);
+            if (currentDetailTab !== 'debug' || !debugViewInitialized || debugPaused) return;
+
+            const card = document.getElementById('w-' + cssId(w.id));
+            if (!existed || !card) {
+                // New widget (or layout changed) — rebuild the whole grid so it
+                // lands in the right group. Cheap; happens rarely.
+                renderDebugTab();
+                return;
+            }
+            card.classList.remove('stale');
+            updateCardValue(card, w);
+            if (w.type === 'plot') { plotDirty.add(w.id); scheduleRaf(); }
+        }
+
+        function cssId(id) { return id.replace(/[^a-zA-Z0-9_-]/g, '_'); }
+
+        function renderDebugTab() {
+            const detail = document.getElementById('detail');
+            debugViewInitialized = true;
+
+            if (panelWidgets.size === 0) {
+                detail.innerHTML = '<div class="debug-container">' +
+                    '<div class="debug-toolbar"><h2>Debug Dashboard</h2></div>' +
+                    '<div class="empty-state"><p>No widgets yet.</p>' +
+                    '<p class="hint">Send <code>POST http://localhost:3335/panel</code> with ' +
+                    '<code>{ id, type, value, group? }</code> — type ∈ label · progress · gauge · plot</p></div></div>';
+                return;
+            }
+
+            // Group widgets, sort groups alphabetically (Default last), widgets by order then label.
+            const groups = new Map();
+            for (const w of panelWidgets.values()) {
+                const g = w.group || 'Default';
+                if (!groups.has(g)) groups.set(g, []);
+                groups.get(g).push(w);
+            }
+            const groupNames = [...groups.keys()].sort((a, b) => {
+                if (a === 'Default') return 1; if (b === 'Default') return -1;
+                return a.localeCompare(b);
+            });
+
+            let html = '<div class="debug-container">';
+            html += '<div class="debug-toolbar">';
+            html += '<h2>Debug Dashboard</h2>';
+            html += '<div class="debug-actions">';
+            html += '<button class="debug-btn" onclick="toggleDebugPause(this)">' + (debugPaused ? '▶ Resume' : '⏸ Pause') + '</button>';
+            html += '<button class="debug-btn" onclick="clearDebugDashboard()">✕ Clear</button>';
+            html += '</div></div>';
+
+            for (const g of groupNames) {
+                const list = groups.get(g).sort((a, b) => (a.order - b.order) || a.label.localeCompare(b.label));
+                html += '<div class="debug-group"><div class="debug-group-header">' + escapeHtml(g) + '</div>';
+                html += '<div class="debug-grid">';
+                for (const w of list) html += renderWidgetCard(w);
+                html += '</div></div>';
+            }
+            html += '</div>';
+            detail.innerHTML = html;
+
+            // Draw all canvases (plots + gauges) after DOM exists.
+            for (const w of panelWidgets.values()) {
+                if (w.type === 'plot') { plotDirty.add(w.id); }
+                else if (w.type === 'gauge' && typeof w.value === 'number') { drawGauge(w); }
+            }
+            scheduleRaf();
+            startStaleTimer();
+        }
+
+        function renderWidgetCard(w) {
+            const color = widgetColor(w);
+            const cid = cssId(w.id);
+            let body = '';
+            if (w.type === 'label') {
+                body = '<div class="widget-value-row">' +
+                    '<span class="widget-value">' + escapeHtml(String(w.value)) + '</span>' +
+                    (w.unit ? '<span class="widget-unit">' + escapeHtml(w.unit) + '</span>' : '') +
+                    '</div>';
+            } else if (w.type === 'progress') {
+                body = renderProgressBody(w);
+            } else if (w.type === 'gauge') {
+                body = renderGaugeBody(w);
+            } else if (w.type === 'plot') {
+                body = '<canvas class="widget-plot-canvas" id="plot-' + cid + '" width="320" height="90"></canvas>' +
+                    '<div class="widget-plot-stats" id="pstat-' + cid + '"></div>';
+            }
+            return '<div class="widget-card" id="w-' + cid + '" style="--w-accent:' + color + '">' +
+                '<div class="widget-label">' + escapeHtml(w.label) + '</div>' +
+                '<div class="widget-body">' + body + '</div>' +
+                '</div>';
+        }
+
+        function renderProgressBody(w) {
+            const max = w.max != null ? w.max : 100, min = w.min != null ? w.min : 0;
+            const val = typeof w.value === 'number' ? w.value : 0;
+            const pct = Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
+            const col = (w.warn != null || w.crit != null) ? zoneColor(w, val) : widgetColor(w);
+            return '<div class="widget-value-row">' +
+                '<span class="widget-value">' + fmtNum(val) + '</span>' +
+                (w.unit ? '<span class="widget-unit">' + escapeHtml(w.unit) + '</span>' : '') +
+                '<span class="widget-pct">' + pct.toFixed(0) + '%</span></div>' +
+                '<div class="widget-progress"><div class="widget-progress-fill" style="width:' + pct + '%;background:' + col + '"></div></div>';
+        }
+
+        function renderGaugeBody(w) {
+            const cid = cssId(w.id);
+            if (typeof w.value === 'string') {
+                // Status LED mode.
+                const st = w.value.toLowerCase();
+                const led = st === 'error' || st === 'crit' || st === 'fail' ? ACCENT_MAP.red
+                    : st === 'warn' || st === 'warning' ? ACCENT_MAP.yellow
+                    : st === 'ok' || st === 'good' || st === 'up' ? ACCENT_MAP.green
+                    : widgetColor(w);
+                return '<div class="widget-led-row"><span class="widget-led" style="--led:' + led + '"></span>' +
+                    '<span class="widget-led-text">' + escapeHtml(w.value) + '</span></div>';
+            }
+            return '<canvas class="widget-gauge-canvas" id="gauge-' + cid + '" width="160" height="100"></canvas>';
+        }
+
+        // In-place value update (no DOM rebuild) for an existing card.
+        function updateCardValue(card, w) {
+            if (w.type === 'label') {
+                const v = card.querySelector('.widget-value');
+                if (v) { v.textContent = String(w.value); flashValue(v); }
+            } else if (w.type === 'progress') {
+                const body = card.querySelector('.widget-body');
+                if (body) body.innerHTML = renderProgressBody(w);
+            } else if (w.type === 'gauge') {
+                if (typeof w.value === 'string') {
+                    const body = card.querySelector('.widget-body');
+                    if (body) body.innerHTML = renderGaugeBody(w);
+                } else {
+                    drawGauge(w);
+                }
+            }
+            // plot handled via plotDirty/raf
+        }
+
+        function flashValue(el) {
+            el.classList.remove('value-flash');
+            void el.offsetWidth;  // restart animation
+            el.classList.add('value-flash');
+        }
+
+        function fmtNum(n) {
+            if (typeof n !== 'number') return String(n);
+            if (Math.abs(n) >= 1000 || Number.isInteger(n)) return n.toLocaleString('en-US');
+            return n.toFixed(2);
+        }
+
+        // -- Canvas: plot (HWiNFO/Afterburner style line graph) --
+        function drawPlot(w) {
+            const canvas = document.getElementById('plot-' + cssId(w.id));
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const W = canvas.width, H = canvas.height;
+            const data = w.history || [];
+            ctx.clearRect(0, 0, W, H);
+
+            // Grid.
+            ctx.strokeStyle = 'rgba(122,162,247,0.10)';
+            ctx.lineWidth = 1;
+            for (let i = 1; i < 4; i++) { const y = (H / 4) * i; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+            for (let i = 1; i < 6; i++) { const x = (W / 6) * i; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+
+            if (data.length < 2) return;
+            let lo = Math.min(...data), hi = Math.max(...data);
+            if (lo === hi) { lo -= 1; hi += 1; }
+            const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+            const color = widgetColor(w);
+            const xAt = i => (i / (data.length - 1)) * W;
+            const yAt = v => H - ((v - lo) / (hi - lo)) * H;
+
+            // Fill under curve.
+            const grad = ctx.createLinearGradient(0, 0, 0, H);
+            grad.addColorStop(0, hexA(color, 0.35));
+            grad.addColorStop(1, hexA(color, 0.0));
+            ctx.beginPath(); ctx.moveTo(0, H);
+            data.forEach((v, i) => ctx.lineTo(xAt(i), yAt(v)));
+            ctx.lineTo(W, H); ctx.closePath();
+            ctx.fillStyle = grad; ctx.fill();
+
+            // Line + glow.
+            ctx.beginPath();
+            data.forEach((v, i) => i === 0 ? ctx.moveTo(xAt(i), yAt(v)) : ctx.lineTo(xAt(i), yAt(v)));
+            ctx.strokeStyle = color; ctx.lineWidth = 1.8;
+            ctx.shadowColor = color; ctx.shadowBlur = 6;
+            ctx.stroke(); ctx.shadowBlur = 0;
+
+            // min/max/avg labels.
+            const avg = data.reduce((a, b) => a + b, 0) / data.length;
+            const stat = document.getElementById('pstat-' + cssId(w.id));
+            if (stat) {
+                stat.innerHTML =
+                    '<span>cur ' + fmtNum(w.value) + (w.unit ? ' ' + escapeHtml(w.unit) : '') + '</span>' +
+                    '<span>min ' + fmtNum(Math.min(...data)) + '</span>' +
+                    '<span>max ' + fmtNum(Math.max(...data)) + '</span>' +
+                    '<span>avg ' + fmtNum(avg) + '</span>';
+            }
+        }
+
+        // -- Canvas: radial gauge (Afterburner / ASUS GPU Tweak style) --
+        function drawGauge(w) {
+            const canvas = document.getElementById('gauge-' + cssId(w.id));
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const W = canvas.width, H = canvas.height;
+            ctx.clearRect(0, 0, W, H);
+            const cx = W / 2, cy = H - 8, r = Math.min(W / 2, H) - 14;
+            const min = w.min != null ? w.min : 0, max = w.max != null ? w.max : 100;
+            const val = typeof w.value === 'number' ? w.value : 0;
+            const frac = Math.max(0, Math.min(1, (val - min) / (max - min)));
+            const start = Math.PI, end = 2 * Math.PI;   // upper half-circle, left→right
+            const ang = start + (end - start) * frac;
+            const col = (w.warn != null || w.crit != null) ? zoneColor(w, val) : widgetColor(w);
+
+            // Track.
+            ctx.beginPath(); ctx.arc(cx, cy, r, start, end);
+            ctx.strokeStyle = 'rgba(122,162,247,0.15)'; ctx.lineWidth = 9; ctx.lineCap = 'round'; ctx.stroke();
+            // Value arc + glow.
+            ctx.beginPath(); ctx.arc(cx, cy, r, start, ang);
+            ctx.strokeStyle = col; ctx.lineWidth = 9; ctx.lineCap = 'round';
+            ctx.shadowColor = col; ctx.shadowBlur = 10; ctx.stroke(); ctx.shadowBlur = 0;
+            // Center value.
+            ctx.fillStyle = col; ctx.font = '600 22px ui-monospace, monospace';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+            ctx.fillText(fmtNum(val), cx, cy - 4);
+            if (w.unit) {
+                ctx.fillStyle = getCss('--text-muted'); ctx.font = '11px ui-monospace, monospace';
+                ctx.fillText(w.unit, cx, cy + 10);
+            }
+        }
+
+        function hexA(hex, a) {
+            // #rrggbb → rgba(). If not hex, just return with alpha via color-mix fallback.
+            const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+            if (!m) return hex;
+            const n = parseInt(m[1], 16);
+            return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+        }
+
+        function scheduleRaf() {
+            if (rafScheduled) return;
+            rafScheduled = true;
+            requestAnimationFrame(() => {
+                rafScheduled = false;
+                if (currentDetailTab !== 'debug') { plotDirty.clear(); return; }
+                for (const id of plotDirty) {
+                    const w = panelWidgets.get(id);
+                    if (w) drawPlot(w);
+                }
+                plotDirty.clear();
+            });
+        }
+
+        let staleTimer = null;
+        function startStaleTimer() {
+            if (staleTimer) return;
+            staleTimer = setInterval(() => {
+                if (currentDetailTab !== 'debug') return;
+                const now = Date.now();
+                for (const w of panelWidgets.values()) {
+                    const card = document.getElementById('w-' + cssId(w.id));
+                    if (!card) continue;
+                    const stale = (now - (w.lastUpdate || 0)) > STALE_MS;
+                    card.classList.toggle('stale', stale);
+                }
+            }, 1000);
+        }
+
+        function toggleDebugPause(btn) {
+            debugPaused = !debugPaused;
+            btn.textContent = debugPaused ? '▶ Resume' : '⏸ Pause';
+            if (!debugPaused) renderDebugTab();
+        }
+        function clearDebugDashboard() {
+            panelWidgets.clear();
+            fetch('http://localhost:3335/panel/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+            renderDebugTab();
+        }
 
         function renderTree(node, container = document.getElementById('tree'), depth = 0) {
             if (depth === 0) {
