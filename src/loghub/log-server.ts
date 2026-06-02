@@ -9,8 +9,8 @@
 
 import express from 'express';
 import { createServer, type Server } from 'http';
-import { join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { join, isAbsolute, dirname } from 'path';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import BetterSqlite3 from 'better-sqlite3';
 import { LogBuffer } from './log-buffer.js';
 import { broadcastLogEntry } from '../viewer/server.js';
@@ -19,7 +19,18 @@ import type { LogEntry, LogLevel, LogConfig, LogStats, LogHttpEntry } from './lo
 const VALID_LEVELS = new Set<string>(['debug', 'info', 'warn', 'error']);
 const BODY_LIMIT = '64kb';
 const VIEWER_PORT = 3333;
-const BIND_HOST = '127.0.0.1';
+const BIND_HOST = '0.0.0.0';
+
+// Blob assembly: external programs (e.g. an ESP32) stream a binary file to the
+// hub as a sequence of base64 chunks under a name, then signal EOB to flush it
+// to disk. Useful for pulling audio captures, screenshots, dumps off a device
+// that has no other file transport. Chunks accumulate in RAM (per name); only
+// on EOB is the whole thing decoded once and written binary. A name WITHOUT a
+// path goes to BLOB_DEFAULT_DIR; an absolute/relative path is used as given.
+const BLOB_DEFAULT_DIR = 'C:\\temp\\loghub';
+const BLOB_MAX_BYTES = 64 * 1024 * 1024;   // 64 MB cap per blob (safety)
+interface BlobInProgress { chunks: Buffer[]; bytes: number; }
+const blobs = new Map<string, BlobInProgress>();
 
 let logServer: Server | null = null;
 let logBuffer: LogBuffer | null = null;
@@ -91,6 +102,75 @@ export function initLogHub(config: LogConfig): Promise<string> {
             if (entry) ids.push(entry.id);
         }
         res.status(201).json({ count: ids.length, ids });
+    });
+
+    // POST /blob — assemble a binary file from base64 chunks.
+    //   body: { name: string, data?: string (base64), eob?: boolean, reset?: boolean }
+    //   - reset:true   → discard any existing buffer for `name` and start fresh
+    //   - data         → append these decoded bytes to the buffer for `name`
+    //   - eob:true     → write the assembled buffer to disk and clear it
+    // A single POST may carry data AND eob (last chunk + flush in one go).
+    app.post('/blob', (req, res) => {
+        const body = req.body as { name?: string; data?: string; eob?: boolean; reset?: boolean };
+        if (!body || typeof body.name !== 'string' || !body.name.trim()) {
+            res.status(400).json({ error: 'blob requires a non-empty "name"' });
+            return;
+        }
+        const name = body.name.trim();
+
+        if (body.reset) blobs.delete(name);
+
+        // Append a chunk if present.
+        if (typeof body.data === 'string' && body.data.length > 0) {
+            let buf: Buffer;
+            try {
+                buf = Buffer.from(body.data, 'base64');
+            } catch {
+                res.status(400).json({ error: 'data is not valid base64' });
+                return;
+            }
+            let bip = blobs.get(name);
+            if (!bip) { bip = { chunks: [], bytes: 0 }; blobs.set(name, bip); }
+            if (bip.bytes + buf.length > BLOB_MAX_BYTES) {
+                blobs.delete(name);
+                res.status(413).json({ error: `blob "${name}" exceeded ${BLOB_MAX_BYTES} bytes — discarded` });
+                return;
+            }
+            bip.chunks.push(buf);
+            bip.bytes += buf.length;
+        }
+
+        // Flush to disk on EOB.
+        if (body.eob) {
+            const bip = blobs.get(name);
+            if (!bip || bip.bytes === 0) {
+                res.status(400).json({ error: `EOB for "${name}" but no data was received` });
+                return;
+            }
+            const full = Buffer.concat(bip.chunks, bip.bytes);
+            blobs.delete(name);
+
+            // No path → default dir; otherwise honour the given (abs or rel) path.
+            const hasPath = name.includes('/') || name.includes('\\');
+            const outPath = hasPath
+                ? (isAbsolute(name) ? name : join(process.cwd(), name))
+                : join(BLOB_DEFAULT_DIR, name);
+            try {
+                const dir = dirname(outPath);
+                if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+                writeFileSync(outPath, full);
+            } catch (err) {
+                res.status(500).json({ error: `failed to write blob: ${(err as Error).message}` });
+                return;
+            }
+            console.error(`[LogHub] blob "${name}" written: ${full.length} bytes → ${outPath}`);
+            res.status(201).json({ name, bytes: full.length, path: outPath });
+            return;
+        }
+
+        // Just an append (no flush yet).
+        const bip = blobs.get(name);
+        res.status(202).json({ name, buffered: bip ? bip.bytes : 0 });
     });
 
     // GET /health

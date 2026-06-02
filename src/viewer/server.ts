@@ -11,7 +11,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import path from 'path';
 import { existsSync, readFileSync, statSync } from 'fs';
 import chokidar, { FSWatcher } from 'chokidar';
@@ -23,6 +23,13 @@ import { PRODUCT_NAME, INDEX_DIR } from '../constants.js';
 import Database from 'better-sqlite3';
 
 const PORT = 3333;
+
+// Per-client send-queue cap. Above this, broadcast frames are dropped rather
+// than buffered. Without this guard ws's internal queue grows without bound
+// when a client is slow/idle while logs stream in — seen producing 100+ GB
+// of committed memory during continuous logging.
+const WS_BACKPRESSURE_BYTES = 1_048_576;
+const wsDropCounts = new WeakMap<WebSocket, number>();
 
 let server: ReturnType<typeof createServer> | null = null;
 let wss: WebSocketServer | null = null;
@@ -88,7 +95,7 @@ interface SessionChangeInfo {
     new: Set<string>;
 }
 
-export async function startViewer(projectPath: string, initialTab?: string): Promise<string> {
+export async function startViewer(projectPath: string, initialTab?: string, options?: { exitOnLastClientClose?: boolean }): Promise<string> {
     const hash = initialTab ? `#tab=${encodeURIComponent(initialTab)}` : '';
 
     // Check if already running — broadcast a focus message + reopen browser at the hash URL.
@@ -136,6 +143,16 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
     server = createServer(app);
     wss = new WebSocketServer({ server });
 
+    // Swallow ws errors that bubble up from the attached HTTP server (e.g. EADDRINUSE).
+    // The HTTP server's own 'error' handler below resolves the start-promise with a
+    // friendly "already running" message — without this listener the error would
+    // crash the process via an uncaught 'error' event.
+    wss.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code !== 'EADDRINUSE') {
+            console.error('[Viewer] WebSocket server error:', err);
+        }
+    });
+
     // File watcher for live reload
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const pendingChanges: Set<string> = new Set();  // Files changed since last broadcast
@@ -173,14 +190,29 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
         const allTree = await buildTree(freshDb.getDb(), projectPath, 'all', viewerSessionChanges, cachedGitInfo);
         freshDb.close();
 
-        // Broadcast to all connected clients
+        // Broadcast to all connected clients. Tree payloads are large (full
+        // code + all trees), so a slow client must not be allowed to back up
+        // ws's internal send-queue — that was the dominant memory leak (50+ GB)
+        // on actively-changing projects where chokidar fires often.
+        const refreshPayload = JSON.stringify({ type: 'refresh', codeTree, allTree });
+        let sent = 0;
+        let dropped = 0;
         wss.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'refresh', codeTree, allTree }));
+            if (client.readyState !== WebSocket.OPEN) return;
+            if (client.bufferedAmount > WS_BACKPRESSURE_BYTES) {
+                const n = (wsDropCounts.get(client) ?? 0) + 1;
+                wsDropCounts.set(client, n);
+                if (n === 1 || n % 1000 === 0) {
+                    console.error(`[Viewer] WS backpressure — dropped ${n} tree-refresh frame(s) for slow client (buffered=${client.bufferedAmount})`);
+                }
+                dropped++;
+                return;
             }
+            client.send(refreshPayload);
+            sent++;
         });
 
-        console.error('[Viewer] Broadcast tree update to', wss.clients.size, 'clients');
+        console.error('[Viewer] Broadcast tree update — sent:', sent, 'dropped:', dropped);
     };
 
     // Use chokidar for reliable cross-platform file watching
@@ -416,6 +448,23 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
 
         ws.on('close', () => {
             console.error('[Viewer] Client disconnected');
+
+            // Auto-shutdown when the last browser tab closes (CLI mode).
+            // Browsers send a close frame immediately on tab close, so we add a small
+            // grace period to allow page reloads (which momentarily drop the connection).
+            if (options?.exitOnLastClientClose && wss) {
+                setTimeout(() => {
+                    if (!wss) return;
+                    const remaining = Array.from(wss.clients).filter(
+                        c => c.readyState === WebSocket.OPEN || c.readyState === WebSocket.CONNECTING
+                    ).length;
+                    if (remaining === 0) {
+                        console.error('[Viewer] Last client closed — shutting down.');
+                        try { stopViewer(); } catch { /* ignore */ }
+                        process.exit(0);
+                    }
+                }, 2000);
+            }
         });
 
         // Send initial tree (code files only)
@@ -438,7 +487,9 @@ export async function startViewer(projectPath: string, initialTab?: string): Pro
 
         server!.on('error', (err: NodeJS.ErrnoException) => {
             if (err.code === 'EADDRINUSE') {
-                resolve(`Port ${PORT} already in use - viewer may already be running at http://localhost:${PORT}`);
+                const url = `http://localhost:${PORT}${hash}`;
+                try { openBrowser(url); } catch { /* ignore */ }
+                resolve(`Port ${PORT} already in use - opened browser at existing viewer (${url})`);
             } else {
                 reject(err);
             }
@@ -517,10 +568,11 @@ export function broadcastFocusTab(tab: string): void {
     // Also try a live broadcast for the case where the browser is already
     // connected to *this* module instance.
     if (wss) {
+        const focusPayload = JSON.stringify({ type: 'focusTab', tab });
         wss.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'focusTab', tab }));
-            }
+            if (client.readyState !== WebSocket.OPEN) return;
+            if (client.bufferedAmount > WS_BACKPRESSURE_BYTES) return; // skip slow client
+            client.send(focusPayload);
         });
     }
 }
@@ -533,28 +585,37 @@ export function broadcastTaskUpdate(): void {
         const taskData = getTasksFromDb(freshDb.getDb());
         freshDb.close();
 
+        const payload = JSON.stringify({ type: 'tasks', data: taskData });
+        let sent = 0;
+        let dropped = 0;
         wss.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'tasks', data: taskData }));
-            }
+            if (client.readyState !== WebSocket.OPEN) return;
+            if (client.bufferedAmount > WS_BACKPRESSURE_BYTES) { dropped++; return; }
+            client.send(payload);
+            sent++;
         });
-        console.error('[Viewer] Broadcast task update to', wss.clients.size, 'clients');
+        console.error('[Viewer] Broadcast task update — sent:', sent, 'dropped:', dropped);
     } catch (err) {
         console.error('[Viewer] Failed to broadcast task update:', err);
     }
 }
 
-/**
- * Broadcast a log entry to all connected viewer clients.
- * Called from log-server.ts on each new entry.
- */
 export function broadcastLogEntry(entry: import('../loghub/log-types.js').LogEntry): void {
     if (!wss) return;
 
+    const payload = JSON.stringify({ type: 'log', entry });
     wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'log', entry }));
+        if (client.readyState !== WebSocket.OPEN) return;
+        if (client.bufferedAmount > WS_BACKPRESSURE_BYTES) {
+            const dropped = (wsDropCounts.get(client) ?? 0) + 1;
+            wsDropCounts.set(client, dropped);
+            // Log once per 1000 drops so a stuck client doesn't itself spam stderr.
+            if (dropped === 1 || dropped % 1000 === 0) {
+                console.error(`[Viewer] WS backpressure — dropped ${dropped} log frame(s) for slow client (buffered=${client.bufferedAmount})`);
+            }
+            return;
         }
+        client.send(payload);
     });
 }
 
@@ -576,19 +637,29 @@ export function stopViewer(): string {
 
 function openBrowser(url: string) {
     const platform = process.platform;
-    let cmd: string;
 
-    if (platform === 'win32') {
-        cmd = `start "" "${url}"`;
-    } else if (platform === 'darwin') {
-        cmd = `open "${url}"`;
-    } else {
-        cmd = `xdg-open "${url}"`;
+    // Use detached + unref so the browser launch survives even if this Node
+    // process exits immediately afterwards (relevant in the "already in use"
+    // CLI path where the launcher exits right after opening the browser).
+    try {
+        let child;
+        if (platform === 'win32') {
+            // `start` is a cmd.exe builtin — invoke via cmd /c, detached, with no inherited stdio.
+            child = spawn('cmd', ['/c', 'start', '""', url], {
+                detached: true,
+                stdio: 'ignore',
+                windowsHide: true,
+            });
+        } else if (platform === 'darwin') {
+            child = spawn('open', [url], { detached: true, stdio: 'ignore' });
+        } else {
+            child = spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
+        }
+        child.on('error', (err) => console.error('[Viewer] Failed to open browser:', err));
+        child.unref();
+    } catch (err) {
+        console.error('[Viewer] Failed to spawn browser opener:', err);
     }
-
-    exec(cmd, (err) => {
-        if (err) console.error('[Viewer] Failed to open browser:', err);
-    });
 }
 
 /**

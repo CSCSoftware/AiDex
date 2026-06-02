@@ -9,6 +9,7 @@
  *   node build/index.js scan <path>           - Scan for .aidex directories
  *   node build/index.js init <path>           - Index a project
  *   node build/index.js global-init <path>    - Scan, index unindexed, register in global DB
+ *   node build/index.js viewer <path>         - Open interactive Viewer in the browser
  */
 
 // Node >=18 is required (better-sqlite3 native bindings, fs.cpSync, etc.).
@@ -32,7 +33,7 @@ import { createServer } from './server/mcp-server.js';
 import { scan, init, globalInit } from './commands/index.js';
 import { setupMcpClients, unsetupMcpClients } from './commands/setup.js';
 import { PRODUCT_NAME, PRODUCT_NAME_LOWER } from './constants.js';
-import { stopViewer } from './viewer/server.js';
+import { startViewer, stopViewer } from './viewer/server.js';
 import { freeLogHub } from './loghub/log-server.js';
 
 async function main() {
@@ -147,6 +148,45 @@ async function main() {
         }
 
         console.log(`\n  Totals: ${result.totals.projects} projects | ${result.totals.files} files | ${result.totals.methods} methods | ${result.totals.types} types`);
+        return;
+    }
+
+    // CLI mode: viewer
+    if (args[0] === 'viewer') {
+        const projectPath = args[1] || process.cwd();
+        const tabArg = args.find(a => a.startsWith('--tab='));
+        const initialTab = tabArg ? tabArg.slice('--tab='.length) : undefined;
+
+        console.log(`Starting Viewer for: ${projectPath}`);
+        let result: string;
+        try {
+            result = await startViewer(projectPath, initialTab, { exitOnLastClientClose: true });
+            console.log(result);
+        } catch (err) {
+            console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+            process.exit(1);
+        }
+
+        // If the port was already in use, another viewer instance is serving.
+        // We just opened the browser — no need to keep this CLI process alive.
+        // Exit code 2 signals "already running" so the launcher can keep its
+        // console window open for the user to read the message.
+        // Small delay so the detached browser-spawn definitely completes before
+        // this process (and any inherited stdio) goes away.
+        if (result.includes('already in use')) {
+            await new Promise(r => setTimeout(r, 400));
+            process.exit(2);
+        }
+
+        console.log('Server runs until you close the browser tab or press Ctrl+C.');
+
+        // Keep the process alive — the viewer runs until SIGINT.
+        const shutdownViewer = () => {
+            try { console.log(stopViewer()); } catch { /* ignore */ }
+            process.exit(0);
+        };
+        process.on('SIGINT', shutdownViewer);
+        process.on('SIGTERM', shutdownViewer);
         return;
     }
 
