@@ -2126,6 +2126,9 @@ function getViewerHTML(projectPath: string): string {
         .debug-grid {
             display: grid; gap: 12px;
             grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+            /* Stable row baseline so a value change inside one card can't reflow
+               the rows below it (no flicker on latency spikes / number growth). */
+            grid-auto-rows: minmax(96px, auto);
         }
 
         .widget-card {
@@ -2153,10 +2156,13 @@ function getViewerHTML(projectPath: string): string {
             color: var(--text-secondary); margin-bottom: 8px; font-weight: 600;
         }
         .widget-body { display: flex; flex-direction: column; gap: 6px; }
-        .widget-value-row { display: flex; align-items: baseline; gap: 6px; }
+        .widget-value-row {
+            display: flex; align-items: baseline; gap: 6px;
+            flex-wrap: nowrap; overflow: hidden; white-space: nowrap;
+        }
         .widget-value {
             font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-            font-size: 1.7em; font-weight: 600; line-height: 1;
+            font-size: 1.7em; font-weight: 600; line-height: 1.15;
             color: var(--accent-cyan); text-shadow: 0 0 12px rgba(125,207,255,0.35);
         }
         .widget-unit { font-size: 0.85em; color: var(--text-muted); }
@@ -2190,10 +2196,11 @@ function getViewerHTML(projectPath: string): string {
             background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border);
         }
         .widget-plot-stats {
-            display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px;
+            display: flex; gap: 10px; flex-wrap: nowrap; overflow: hidden; margin-top: 4px;
+            height: 1.1em; line-height: 1.1em;   /* fixed height — never reflows on value change */
             font-family: ui-monospace, monospace; font-size: 0.72em; color: var(--text-secondary);
         }
-        .widget-plot-stats span { white-space: nowrap; }
+        .widget-plot-stats span { white-space: nowrap; flex: 1 1 0; min-width: 0; }
         .widget-plot-stats span:first-child { color: var(--accent-cyan); }
 
         @keyframes widget-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
