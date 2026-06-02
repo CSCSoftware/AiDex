@@ -99,6 +99,7 @@ aidex_task({ path: ".", action: "create", title: "Fix edge case in parser", prio
 - [Global Search](#global-search)
 - [AI Guidelines](#ai-guidelines)
 - [Log Hub](#log-hub--universal-logging)
+- [Debug Dashboard](#debug-dashboard)
 - [Screenshots — LLM-Optimized](#screenshots--llm-optimized)
 - [Interactive Viewer](#interactive-viewer)
 - [CLI Usage](#cli-usage)
@@ -722,6 +723,59 @@ Invoke-RestMethod -Uri http://localhost:3335/log -Method POST -ContentType "appl
 - **Consume pattern**: `query` with `consume: true` removes returned entries — ideal for polling
 - **Viewer integration**: Logs tab with WebSocket live-stream, level/source/text filters, auto-scroll
 - **Fire & forget**: Just POST and go — if the server isn't running, the POST silently fails
+
+## Debug Dashboard
+
+The scrolling log stream is great for *what happened when* — but useless for fast, repeating values (audio levels, buffer fill, FPS, sensor readings). The **Debug Dashboard** is the opposite: a fixed-slot panel where each value has a permanent spot and **overwrites in place** instead of scrolling away. Live in the Viewer's **Debug tab**, styled like a hardware monitor (MSI Afterburner / HWiNFO).
+
+It rides on the same Log Hub server — no extra setup. Your program sends widget updates via HTTP POST; sending the same `id` again updates that widget.
+
+### Widget types
+
+| Type | Looks like | Use for |
+|------|-----------|---------|
+| `label` | big value + unit | FPS, state text, counters |
+| `progress` | bar with warn/crit colouring | buffer fill, percentages |
+| `gauge` | radial tachometer (or status LED for strings) | temperature, load, ok/warn/error |
+| `plot` | real-time line graph with grid + min/max/avg | audio signal, latency, any time series |
+
+### Send a widget
+
+```bash
+# A single widget — id is the fixed slot, type is required on first send
+curl -X POST http://localhost:3335/panel -H "Content-Type: application/json" \
+  -d '{"id":"mic","type":"plot","value":0.73,"group":"Audio","label":"Mic Level","unit":"dB"}'
+
+# A gauge with threshold zones (green < warn < yellow < crit < red)
+curl -X POST http://localhost:3335/panel -H "Content-Type: application/json" \
+  -d '{"id":"gpu_temp","type":"gauge","value":67,"min":0,"max":100,"warn":75,"crit":90,"group":"Hardware"}'
+```
+
+**Fields:** `id` (required), `type` (`label`/`progress`/`gauge`/`plot`, required on first send), `value` (number, status string, or number array for a full plot frame), `group`, `label`, `unit`, `min`, `max`, `warn`, `crit`, `color`, `order`.
+**Endpoints:** `POST /panel` (one), `POST /panels` (batch), `POST /panel/clear` (`{id}` for one, empty for all).
+
+### Lifecycle
+
+- The server keeps the last state per `id`, so a freshly-opened or reloaded Viewer shows the whole dashboard immediately.
+- Cards with no update for ~3 s grey out as "stale".
+- **Clear** is a full reset: it empties the store. A source only reappears if it sends widgets *with their `type`* again (plain value-only updates to a cleared id are ignored).
+- Backpressure-guarded — a slow browser can't make the server's send-queue grow without bound.
+
+### Try it — the built-in demo
+
+A ready-to-run showcase animates all widget types (audio waveform, GPU gauges drifting through their zones, a signal generator cycling sine → sawtooth → triangle → square, latency spikes):
+
+```bash
+# 1. Start the Log Hub + Viewer from your AI assistant:
+#      aidex_log({ action: "init" })
+#      aidex_viewer({ path: "." })       → click the Debug tab
+# 2. Run the demo (from the AiDex repo root):
+node scripts/demo-dashboard.mjs           # endless loop, Ctrl+C to stop (clears on exit)
+```
+
+Or use the **▷ Demo** button on the Debug tab — it copies the run command to your clipboard; paste it into a terminal. (The browser can't spawn a process itself.) `scripts/demo-dashboard.ps1` is a one-command launcher that checks the Log Hub first.
+
+> Running it twice starts two instances that fight over the same widgets (visible flicker) — stop the old one (Ctrl+C) before starting another.
 
 ## Screenshots — LLM-Optimized
 

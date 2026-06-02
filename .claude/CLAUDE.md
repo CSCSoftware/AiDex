@@ -463,6 +463,24 @@ requests.post("http://localhost:3335/panel", json={
 // Einzel-Sample je Frame senden — der Server baut den Verlauf, der Viewer plottet flüssig.
 ```
 
+### Demo zum Vorführen
+
+`scripts/demo-dashboard.mjs` animiert alle Widget-Typen endlos (Audio-Waveform, GPU-Gauges durch ihre Zonen, Signalgenerator sine→sawtooth→triangle→square, Latenz-Spikes). Ideal zum Zeigen/Testen.
+
+```
+# Voraussetzung: LogHub + Viewer laufen (aidex_log init, aidex_viewer → Debug-Tab)
+node scripts/demo-dashboard.mjs        # Endlos-Loop, Ctrl+C beendet (clear't beim Exit)
+scripts/demo-dashboard.ps1             # Launcher mit LogHub-Check
+```
+
+Auch per **▷ Demo**-Button im Debug-Tab (kopiert den Befehl in die Zwischenablage).
+
+**⚠️ Nie zweimal starten** — zwei Instanzen überschreiben sich gegenseitig (Flackern). Erst alte stoppen. Und: `TaskStop` killt nur den PowerShell-Wrapper, nicht den node-Prozess — bei Background-Start node direkt aufrufen und nach dem Stop verifizieren ([[feedback_taskstop_orphan_node]]).
+
+### Clear
+
+`POST /panel/clear` (oder der Clear-Button) ist ein **voller Reset** — leert den Store. Eine Quelle taucht nur wieder auf, wenn sie Widgets erneut **mit `type`** sendet (reine value-Updates auf eine gelöschte id werden ignoriert).
+
 ## Dokumentation
 
 | Datei | Inhalt |
