@@ -2114,8 +2114,8 @@ function getViewerHTML(projectPath: string): string {
 
         .debug-group { margin-bottom: 22px; }
         .debug-group-header {
-            font-size: 0.72em; font-weight: 700; letter-spacing: 0.14em;
-            text-transform: uppercase; color: var(--text-muted);
+            font-size: 0.8em; font-weight: 700; letter-spacing: 0.14em;
+            text-transform: uppercase; color: var(--accent-cyan);
             margin-bottom: 10px; padding-left: 2px;
             display: flex; align-items: center; gap: 8px;
         }
@@ -2149,8 +2149,8 @@ function getViewerHTML(projectPath: string): string {
         .widget-card.stale::before { background: var(--text-muted); box-shadow: none; }
 
         .widget-label {
-            font-size: 0.72em; letter-spacing: 0.06em; text-transform: uppercase;
-            color: var(--text-muted); margin-bottom: 8px;
+            font-size: 0.78em; letter-spacing: 0.06em; text-transform: uppercase;
+            color: var(--text-secondary); margin-bottom: 8px; font-weight: 600;
         }
         .widget-body { display: flex; flex-direction: column; gap: 6px; }
         .widget-value-row { display: flex; align-items: baseline; gap: 6px; }
@@ -2191,7 +2191,7 @@ function getViewerHTML(projectPath: string): string {
         }
         .widget-plot-stats {
             display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px;
-            font-family: ui-monospace, monospace; font-size: 0.7em; color: var(--text-muted);
+            font-family: ui-monospace, monospace; font-size: 0.72em; color: var(--text-secondary);
         }
         .widget-plot-stats span { white-space: nowrap; }
         .widget-plot-stats span:first-child { color: var(--accent-cyan); }

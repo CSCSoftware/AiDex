@@ -55,6 +55,12 @@ async function defineWidgets() {
     // --- Network ---
     await panel({ id: 'latency', type: 'plot',  group: 'Network', label: 'Latency',    color: 'orange', unit: 'ms', order: 0 });
     await panel({ id: 'rps',     type: 'label', group: 'Network', label: 'Requests/s', color: 'blue',   unit: 'req', order: 1 });
+
+    // --- System (4 extra demo widgets) ---
+    await panel({ id: 'cpu',    type: 'gauge',    group: 'System', label: 'CPU Load', unit: '%',  min: 0, max: 100, warn: 70, crit: 90, order: 0 });
+    await panel({ id: 'ram',    type: 'progress', group: 'System', label: 'RAM',      unit: 'GB', min: 0, max: 64, warn: 48, crit: 58, order: 1 });
+    await panel({ id: 'diskio', type: 'plot',     group: 'System', label: 'Disk I/O', color: 'green', unit: 'MB/s', order: 2 });
+    await panel({ id: 'uptime', type: 'label',    group: 'System', label: 'Uptime',   color: 'cyan', unit: 's', order: 3 });
 }
 
 function update() {
@@ -92,6 +98,12 @@ function update() {
     const lat = 12 + slow(7) * 10 + (Math.random() < 0.04 ? 40 : 0) + Math.random() * 4; // occasional spike
     panel({ id: 'latency', value: +lat.toFixed(1) });
     panel({ id: 'rps', value: Math.round(800 + slow(9) * 1200) });
+
+    // System (extra widgets): CPU tracks GPU load loosely; RAM creeps; disk I/O bursts.
+    panel({ id: 'cpu', value: Math.round(load * 0.7 + slow(13, 1.2) * 30) });
+    panel({ id: 'ram', value: +(20 + slow(29) * 38).toFixed(1) });
+    panel({ id: 'diskio', value: +(slow(5) * 80 + (Math.random() < 0.06 ? 200 : 0) + Math.random() * 10).toFixed(1) });
+    panel({ id: 'uptime', value: tick * (TICK_MS / 1000) | 0 });
 }
 
 async function main() {
