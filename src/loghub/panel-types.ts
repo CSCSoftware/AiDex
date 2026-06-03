@@ -28,6 +28,9 @@ export interface PanelHttpEntry {
     crit?: number;          // threshold → red zone (gauge/progress)
     color?: string;         // accent name (cyan/green/orange/...) or hex
     order?: number;         // sort order within a group
+    state?: string;         // gauge LED colour ("ok"|"warn"|"error"|...) — when
+                            // set, drives the LED colour while `value` stays the
+                            // free display text (so colour != shown text).
 }
 
 /**
@@ -47,6 +50,7 @@ export interface PanelWidget {
     crit?: number;
     color?: string;
     order: number;
+    state?: string;             // optional gauge LED colour, independent of value
     history?: number[];         // plot: recent samples (cap PLOT_HISTORY)
     lastUpdate: number;         // ms — for stale detection (viewer-side)
 }

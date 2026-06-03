@@ -58,6 +58,7 @@ export class PanelStore {
         if (typeof body.crit === 'number') w.crit = body.crit;
         if (typeof body.color === 'string') w.color = body.color;
         if (typeof body.order === 'number') w.order = body.order;
+        if (typeof body.state === 'string') w.state = body.state;
 
         // Value handling depends on type.
         if (w.type === 'plot') {

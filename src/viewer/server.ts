@@ -2588,12 +2588,15 @@ function getViewerHTML(projectPath: string): string {
         function renderGaugeBody(w) {
             const cid = cssId(w.id);
             if (typeof w.value === 'string') {
-                // Status LED mode.
-                const st = w.value.toLowerCase();
+                // Status LED mode. If state is set, it drives the LED colour and
+                // value stays free display text (colour != shown text). Without
+                // state, the value word itself picks the colour (legacy).
+                const st = (typeof w.state === 'string' ? w.state : w.value).toLowerCase();
                 const led = st === 'error' || st === 'crit' || st === 'fail' ? ACCENT_MAP.red
                     : st === 'warn' || st === 'warning' ? ACCENT_MAP.yellow
                     : st === 'ok' || st === 'good' || st === 'up' ? ACCENT_MAP.green
-                    : widgetColor(w);
+                    : st === 'off' || st === 'idle' ? '#444'
+                    : (ACCENT_MAP[st] || widgetColor(w));
                 return '<div class="widget-led-row"><span class="widget-led" style="--led:' + led + '"></span>' +
                     '<span class="widget-led-text">' + escapeHtml(w.value) + '</span></div>';
             }
@@ -2602,6 +2605,15 @@ function getViewerHTML(projectPath: string): string {
 
         // In-place value update (no DOM rebuild) for an existing card.
         function updateCardValue(card, w) {
+            // Skip redraw if nothing changed — otherwise every incoming sample
+            // re-renders (and re-flashes) even with identical value/state, which
+            // looks like constant flicker at high update rates. Plots are exempt
+            // (their history scrolls even on a repeated value).
+            if (w.type !== 'plot') {
+                const sig = String(w.value) + '' + (w.state == null ? '' : String(w.state));
+                if (card.dataset.lastSig === sig) return;
+                card.dataset.lastSig = sig;
+            }
             if (w.type === 'label') {
                 const v = card.querySelector('.widget-value');
                 if (v) { v.textContent = String(w.value); flashValue(v); }
