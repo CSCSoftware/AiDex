@@ -2198,15 +2198,15 @@ function getViewerHTML(projectPath: string): string {
             width: 100%; height: auto; display: block;
             background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border);
         }
+        /* Vertikal gestapelt (cur/min/max/avg untereinander), damit die vollen
+           Werte lesbar sind und nicht abgeschnitten werden. Feste Höhe = 4 Zeilen. */
         .widget-plot-stats {
-            display: flex; gap: 12px; flex-wrap: nowrap; overflow: hidden; margin-top: 4px;
-            height: 1.1em; line-height: 1.1em;   /* fixed height — never reflows on value change */
+            display: flex; flex-direction: column; gap: 1px; overflow: hidden; margin-top: 4px;
+            line-height: 1.25em;
             font-family: ui-monospace, monospace; font-size: 0.72em; color: var(--text-secondary);
         }
-        /* Each cell = dimmed key + value. min-width:0 + ellipsis means a wide value
-           (e.g. "-19.71 dB") clips instead of running into the next cell. */
-        .pstat { display: flex; align-items: baseline; gap: 4px; flex: 1 1 0; min-width: 0; white-space: nowrap; }
-        .pstat:first-child { flex: 1.4 1 0; }   /* cur carries the unit — give it room */
+        /* Eine Zeile je Kennzahl: Key links, Wert rechtsbündig (space-between). */
+        .pstat { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; white-space: nowrap; }
         .pstat-k { color: var(--text-muted); }
         .pstat-v { overflow: hidden; text-overflow: ellipsis; }
         .widget-plot-stats .pstat:first-child .pstat-v { color: var(--accent-cyan); }
@@ -2659,12 +2659,47 @@ function getViewerHTML(projectPath: string): string {
             for (let i = 1; i < 6; i++) { const x = (W / 6) * i; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
 
             if (data.length < 2) return;
-            let lo = Math.min(...data), hi = Math.max(...data);
-            if (lo === hi) { lo -= 1; hi += 1; }
-            const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+            let lo, hi;
+            if (typeof w.min === 'number' && typeof w.max === 'number' && w.max > w.min) {
+                // Feste Skala vorgegeben (min/max) → keine Autoskala. So bleibt der
+                // Plot stabil und kleine Schwankungen sehen nicht riesig aus.
+                lo = w.min; hi = w.max;
+                // autoMin: Untergrenze folgt dem Daten-Minimum (Decke bleibt max).
+                // So sitzt z. B. das Grundrauschen unten am Rand und die volle
+                // Höhe geht ans Signal darüber — keine "tote" Zone unter dem Floor.
+                if (w.autoMin) {
+                    const dmin = Math.min(...data);
+                    if (dmin < hi) lo = dmin;
+                }
+            } else {
+                // Autoskala über die History + 10% Padding (Default).
+                lo = Math.min(...data); hi = Math.max(...data);
+                if (lo === hi) { lo -= 1; hi += 1; }
+                const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+            }
             const color = widgetColor(w);
             const xAt = i => (i / (data.length - 1)) * W;
-            const yAt = v => H - ((v - lo) / (hi - lo)) * H;
+
+            // Y-Mapping: linear (Default) oder logarithmisch (scale:"log"). Log
+            // braucht positive Werte → auf >=1 clampen (Audio-Pegel passen dazu:
+            // leise Sprache und lauter Peak werden gleichzeitig sichtbar).
+            const isLog = w.scale === 'log';
+            let yAt;
+            if (isLog) {
+                // Log braucht positive Grenzen. lo/hi auf >=1 heben, dann ins
+                // Log-Maß. Werte werden auf [lo,hi] geclampt → unter lo sitzt die
+                // Linie am unteren Rand, über hi am oberen (kein Ausreißer raus).
+                const clo = Math.max(1, lo);
+                const chi = Math.max(clo + 0.0001, hi);
+                const llo = Math.log10(clo);
+                const lhi = Math.log10(chi);
+                yAt = v => {
+                    const lv = Math.log10(Math.min(Math.max(clo, v), chi));
+                    return H - ((lv - llo) / (lhi - llo)) * H;
+                };
+            } else {
+                yAt = v => H - ((Math.min(Math.max(v, lo), hi) - lo) / (hi - lo)) * H;
+            }
 
             // Fill under curve.
             const grad = ctx.createLinearGradient(0, 0, 0, H);
@@ -2687,13 +2722,18 @@ function getViewerHTML(projectPath: string): string {
             const stat = document.getElementById('pstat-' + cssId(w.id));
             if (stat) {
                 const unit = w.unit ? ' ' + escapeHtml(w.unit) : '';
+                // Nachkommastellen vom Sender (decimals); sonst fmtNum-Default.
+                const fmt = (typeof w.decimals === 'number')
+                    ? (v => Number(v).toLocaleString(undefined, {
+                          minimumFractionDigits: w.decimals, maximumFractionDigits: w.decimals }))
+                    : fmtNum;
                 const cell = (k, v) => '<span class="pstat"><span class="pstat-k">' + k + '</span>' +
                     '<span class="pstat-v">' + v + '</span></span>';
                 stat.innerHTML =
-                    cell('cur', fmtNum(w.value) + unit) +
-                    cell('min', fmtNum(Math.min(...data))) +
-                    cell('max', fmtNum(Math.max(...data))) +
-                    cell('avg', fmtNum(avg));
+                    cell('cur', fmt(w.value) + unit) +
+                    cell('min', fmt(Math.min(...data))) +
+                    cell('max', fmt(Math.max(...data))) +
+                    cell('avg', fmt(avg));
             }
         }
 

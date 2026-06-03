@@ -59,6 +59,9 @@ export class PanelStore {
         if (typeof body.color === 'string') w.color = body.color;
         if (typeof body.order === 'number') w.order = body.order;
         if (typeof body.state === 'string') w.state = body.state;
+        if (typeof body.scale === 'string') w.scale = body.scale;
+        if (typeof body.decimals === 'number') w.decimals = body.decimals;
+        if (typeof body.autoMin === 'boolean') w.autoMin = body.autoMin;
 
         // Value handling depends on type.
         if (w.type === 'plot') {

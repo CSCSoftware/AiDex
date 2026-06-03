@@ -31,6 +31,15 @@ export interface PanelHttpEntry {
     state?: string;         // gauge LED colour ("ok"|"warn"|"error"|...) — when
                             // set, drives the LED colour while `value` stays the
                             // free display text (so colour != shown text).
+    scale?: string;         // plot Y-axis: "linear" (default) | "log". The SENDER
+                            // decides — AiDex only renders. "log" suits audio
+                            // levels (quiet speech + loud peak both visible).
+    decimals?: number;      // plot footer (cur/min/max/avg) decimal places. The
+                            // sender controls precision (0 = integers).
+    autoMin?: boolean;      // plot: lower bound follows the data minimum instead
+                            // of the fixed `min`. Upper bound stays `max`. Lets a
+                            // log plot sit the noise floor at the bottom edge so
+                            // the full height is used for the signal above it.
 }
 
 /**
@@ -51,6 +60,9 @@ export interface PanelWidget {
     color?: string;
     order: number;
     state?: string;             // optional gauge LED colour, independent of value
+    scale?: string;             // plot Y-axis: "linear" (default) | "log"
+    decimals?: number;          // plot footer decimal places (sender-controlled)
+    autoMin?: boolean;          // plot: lower bound follows the data minimum
     history?: number[];         // plot: recent samples (cap PLOT_HISTORY)
     lastUpdate: number;         // ms — for stale detection (viewer-side)
 }
