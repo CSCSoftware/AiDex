@@ -2211,6 +2211,30 @@ function getViewerHTML(projectPath: string): string {
         .pstat-v { overflow: hidden; text-overflow: ellipsis; }
         .widget-plot-stats .pstat:first-child .pstat-v { color: var(--accent-cyan); }
 
+        /* Interactive controls (slider / number) — editable, accent-tinted. */
+        .widget-control-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+        .widget-slider {
+            flex: 1; min-width: 0; height: 4px; -webkit-appearance: none; appearance: none;
+            background: var(--border); border-radius: 3px; outline: none; cursor: pointer;
+        }
+        .widget-slider::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none; width: 16px; height: 16px;
+            border-radius: 50%; background: var(--w-accent, var(--accent-cyan)); cursor: pointer;
+            box-shadow: 0 0 8px var(--w-accent, var(--accent-cyan)); border: none;
+        }
+        .widget-slider::-moz-range-thumb {
+            width: 16px; height: 16px; border-radius: 50%; border: none;
+            background: var(--w-accent, var(--accent-cyan)); cursor: pointer;
+            box-shadow: 0 0 8px var(--w-accent, var(--accent-cyan));
+        }
+        .widget-number {
+            font-family: ui-monospace, monospace; font-size: 1.05em;
+            background: var(--bg-primary); color: var(--text-primary);
+            border: 1px solid var(--border); border-radius: 5px; padding: 4px 6px; width: 100%;
+        }
+        .widget-number-mini { width: 5.5em; flex: 0 0 auto; text-align: right; }
+        .widget-number:focus { outline: none; border-color: var(--w-accent, var(--accent-cyan)); }
+
         @keyframes widget-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
         @keyframes value-flash { 0% { color: #fff; text-shadow: 0 0 16px #fff; } 100% {} }
         @keyframes led-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.65; } }
@@ -2506,7 +2530,7 @@ function getViewerHTML(projectPath: string): string {
                     '<div class="debug-toolbar"><h2>Debug Dashboard</h2></div>' +
                     '<div class="empty-state"><p>No widgets yet.</p>' +
                     '<p class="hint">Send <code>POST http://localhost:3335/panel</code> with ' +
-                    '<code>{ id, type, value, group? }</code> — type ∈ label · progress · gauge · plot</p></div></div>';
+                    '<code>{ id, type, value, group? }</code> — type ∈ label · progress · gauge · plot · slider · number</p></div></div>';
                 return;
             }
 
@@ -2566,6 +2590,8 @@ function getViewerHTML(projectPath: string): string {
             } else if (w.type === 'plot') {
                 body = '<canvas class="widget-plot-canvas" id="plot-' + cid + '" width="320" height="90"></canvas>' +
                     '<div class="widget-plot-stats" id="pstat-' + cid + '"></div>';
+            } else if (w.type === 'slider' || w.type === 'number') {
+                body = renderControlBody(w);
             }
             return '<div class="widget-card" id="w-' + cid + '" style="--w-accent:' + color + '">' +
                 '<div class="widget-label">' + escapeHtml(w.label) + '</div>' +
@@ -2603,6 +2629,96 @@ function getViewerHTML(projectPath: string): string {
             return '<canvas class="widget-gauge-canvas" id="gauge-' + cid + '" width="160" height="100"></canvas>';
         }
 
+        // -- Interactive control (slider / number) --
+        // The user edits, the new value is POSTed to /control; the owning source
+        // (e.g. the ESP32) polls GET /control and applies it. Position syncs back
+        // via the broadcast echo — but NOT while the user is actively dragging
+        // (controlDragging), so the server echo can't fight the user's hand.
+        function renderControlBody(w) {
+            const cid = cssId(w.id);
+            const min = w.min != null ? w.min : 0;
+            const max = w.max != null ? w.max : 100;
+            const step = w.step != null ? w.step : 1;
+            const val = typeof w.value === 'number' ? w.value : min;
+            const unit = w.unit ? '<span class="widget-unit">' + escapeHtml(w.unit) + '</span>' : '';
+            // The id travels in a data- attribute (HTML-escaped), NOT inline as a
+            // function argument — an id with quotes would otherwise break out of
+            // the oninput="" attribute. Handlers read it back from the element.
+            const idAttr = 'data-cid="' + escapeHtml(w.id) + '"';
+            if (w.type === 'number') {
+                // Spinner: number input only.
+                return '<div class="widget-control-row">' +
+                    '<input class="widget-number" id="ctl-' + cid + '" type="number" ' + idAttr + ' ' +
+                    'min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" ' +
+                    'oninput="onControlInput(this)">' + unit +
+                    '</div>';
+            }
+            // Slider: range + a small number box that mirrors it (and is editable).
+            return '<div class="widget-control-row">' +
+                '<input class="widget-slider" id="ctl-' + cid + '" type="range" ' + idAttr + ' ' +
+                'min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" ' +
+                'onpointerdown="onControlDragStart(this)" onpointerup="onControlDragEnd()" ' +
+                'oninput="onControlSlide(this)">' +
+                '<input class="widget-number widget-number-mini" id="ctlnum-' + cid + '" type="number" ' + idAttr + ' ' +
+                'min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" ' +
+                'oninput="onControlInput(this)">' + unit +
+                '</div>';
+        }
+
+        // While true, holds the id of the control the user is dragging — the
+        // broadcast echo for THAT id is ignored so the thumb doesn't jump back.
+        let controlDragging = null;
+        // Coalesce slider POSTs: a drag fires oninput per pixel; we don't want a
+        // POST per pixel. Send at most ~every 80 ms, plus the final value on release.
+        const controlPostPending = new Map();
+        let controlPostTimer = null;
+
+        function onControlDragStart(el) { controlDragging = el.dataset.cid; }
+        function onControlDragEnd() { controlDragging = null; }
+
+        function onControlSlide(el) {
+            // Mirror into the slider's companion number box immediately.
+            const id = el.dataset.cid;
+            const numEl = document.getElementById('ctlnum-' + cssId(id));
+            if (numEl) numEl.value = el.value;
+            queueControlPost(id, el.value);
+        }
+
+        function onControlInput(el) {
+            // Number box (or standalone spinner) edited — mirror into the slider if present.
+            const id = el.dataset.cid;
+            const sl = document.getElementById('ctl-' + cssId(id));
+            if (sl && sl.type === 'range') sl.value = el.value;
+            queueControlPost(id, el.value);
+        }
+
+        function queueControlPost(id, raw) {
+            const num = Number(raw);
+            if (!Number.isFinite(num)) return;
+            // Keep the local widget value in sync so a rebuild keeps the position.
+            const w = panelWidgets.get(id);
+            if (w) w.value = num;
+            controlPostPending.set(id, num);
+            if (controlPostTimer) return;
+            controlPostTimer = setTimeout(flushControlPosts, 80);
+        }
+
+        function flushControlPosts() {
+            controlPostTimer = null;
+            for (const [id, value] of controlPostPending) postControl(id, value);
+            controlPostPending.clear();
+        }
+
+        function postControl(id, value) {
+            // LogHub is on 3335; the viewer is 3333. Hard-code the hub port like
+            // the rest of the dashboard ingest does (same machine).
+            fetch('http://localhost:3335/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, value }),
+            }).catch(() => { /* hub down — nothing to do, value stays local */ });
+        }
+
         // In-place value update (no DOM rebuild) for an existing card.
         function updateCardValue(card, w) {
             // Skip redraw if nothing changed — otherwise every incoming sample
@@ -2626,6 +2742,17 @@ function getViewerHTML(projectPath: string): string {
                     if (body) body.innerHTML = renderGaugeBody(w);
                 } else {
                     drawGauge(w);
+                }
+            } else if (w.type === 'slider' || w.type === 'number') {
+                // Echo from the server (another viewer changed it, or the source
+                // clamped/overrode it). Sync the inputs — but never while THIS user
+                // is dragging this control, or the thumb would fight their hand.
+                if (controlDragging !== w.id && typeof w.value === 'number') {
+                    const cid = cssId(w.id);
+                    const main = document.getElementById('ctl-' + cid);
+                    const mini = document.getElementById('ctlnum-' + cid);
+                    if (main && document.activeElement !== main) main.value = w.value;
+                    if (mini && document.activeElement !== mini) mini.value = w.value;
                 }
             }
             // plot handled via plotDirty/raf
@@ -2800,6 +2927,9 @@ function getViewerHTML(projectPath: string): string {
                 for (const w of panelWidgets.values()) {
                     const card = document.getElementById('w-' + cssId(w.id));
                     if (!card) continue;
+                    // Interactive controls hold a static set-point — they never go
+                    // stale (they'd dim a second after load with nothing wrong).
+                    if (w.type === 'slider' || w.type === 'number') { card.classList.remove('stale'); continue; }
                     const stale = (now - (w.lastUpdate || 0)) > STALE_MS;
                     card.classList.toggle('stale', stale);
                 }

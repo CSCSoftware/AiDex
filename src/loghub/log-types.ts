@@ -6,7 +6,8 @@
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-export type LogAction = 'init' | 'free' | 'status' | 'query' | 'clear' | 'write';
+export type LogAction = 'init' | 'free' | 'status' | 'query' | 'clear' | 'write'
+    | 'control_get' | 'control_set';
 
 export interface LogEntry {
     id: number;
@@ -41,6 +42,10 @@ export interface LogParams {
     // write
     message?: string;
     data?: string;
+    // control_set: which control and the new value. The source (e.g. the ESP32)
+    // defines the controls; the AI only reads/sets existing ones.
+    id?: string;
+    value?: number | string;
 }
 
 export interface LogResult {
@@ -49,6 +54,7 @@ export interface LogResult {
     entries?: LogEntry[];
     stats?: LogStats;
     error?: string;
+    controls?: Record<string, number | string>;   // control_get / control_set: current values
 }
 
 export interface LogStats {

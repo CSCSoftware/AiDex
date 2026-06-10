@@ -7,7 +7,7 @@
  * Pattern: Same as task.ts (action-based dispatch).
  */
 
-import { initLogHub, freeLogHub, isLogHubRunning, getLogBuffer, getLogStats, writeLogEntry } from '../loghub/log-server.js';
+import { initLogHub, freeLogHub, isLogHubRunning, getLogBuffer, getLogStats, writeLogEntry, getControlValues, setControl } from '../loghub/log-server.js';
 import { parseTimeOffset } from './query.js';
 import type { LogAction, LogLevel, LogParams, LogResult } from '../loghub/log-types.js';
 
@@ -129,6 +129,34 @@ export async function log(params: LogParams): Promise<LogResult> {
             }
 
             return { success: true, action, entries: [entry] };
+        }
+
+        case 'control_get': {
+            // Read all interactive-control values as a flat { id: value } map.
+            // Lets the AI see exactly what the user sees in the dashboard.
+            if (!isLogHubRunning()) {
+                return { success: false, action, error: 'Log Hub not initialized. Run init first.' };
+            }
+            return { success: true, action, controls: getControlValues() };
+        }
+
+        case 'control_set': {
+            // Change ONE control — the same setter the dashboard slider drives.
+            // The source (e.g. the ESP32) defines which controls exist; this only
+            // changes the value of an existing one. Returns the full map after.
+            if (!isLogHubRunning()) {
+                return { success: false, action, error: 'Log Hub not initialized. Run init first.' };
+            }
+            if (typeof params.id !== 'string' || !params.id.trim()) {
+                return { success: false, action, error: 'id is required for control_set' };
+            }
+            if (params.value === undefined) {
+                return { success: false, action, error: 'value is required for control_set' };
+            }
+            if (!setControl(params.id, params.value)) {
+                return { success: false, action, error: 'invalid control id or value' };
+            }
+            return { success: true, action, controls: getControlValues() };
         }
 
         default:

@@ -793,14 +793,14 @@ export function registerTools(): Tool[] {
         },
         {
             name: `${TOOL_PREFIX}log`,
-            description: `Universal Log Hub — receive and query logs from any external program (C#, Python, Node, etc.) via HTTP. Zero-cost when not used. Actions: init (start HTTP server), free (stop server), status (show stats), query (search logs), clear (reset buffer), write (inject entry as "claude").`,
+            description: `Universal Log Hub — receive and query logs from any external program (C#, Python, Node, etc.) via HTTP. Zero-cost when not used. Actions: init (start HTTP server), free (stop server), status (show stats), query (search logs), clear (reset buffer), write (inject entry as "claude"), control_get (read all interactive dashboard control values), control_set (change one control — same set-point the user's dashboard slider drives, so the AI can tune live).`,
             inputSchema: {
                 type: 'object',
                 properties: {
                     action: {
                         type: 'string',
-                        enum: ['init', 'free', 'status', 'query', 'clear', 'write'],
-                        description: 'init: start server | free: stop server | status: stats | query: search logs | clear: reset buffer | write: inject entry',
+                        enum: ['init', 'free', 'status', 'query', 'clear', 'write', 'control_get', 'control_set'],
+                        description: 'init: start server | free: stop server | status: stats | query: search logs | clear: reset buffer | write: inject entry | control_get: read all control values | control_set: set one control (id+value)',
                     },
                     port: {
                         type: 'number',
@@ -850,6 +850,14 @@ export function registerTools(): Tool[] {
                     data: {
                         type: 'string',
                         description: 'Optional JSON data (write)',
+                    },
+                    id: {
+                        type: 'string',
+                        description: 'Control id to change (required for control_set). The source defines which controls exist.',
+                    },
+                    value: {
+                        type: ['number', 'string'],
+                        description: 'New control value (required for control_set)',
                     },
                 },
                 required: ['action'],
@@ -2743,6 +2751,8 @@ async function handleLog(args: Record<string, unknown>): Promise<{ content: Arra
         consume: args.consume as boolean | undefined,
         message: args.message as string | undefined,
         data: args.data as string | undefined,
+        id: args.id as string | undefined,
+        value: args.value as number | string | undefined,
     });
 
     if (!result.success && result.error) {
@@ -2814,6 +2824,21 @@ async function handleLog(args: Record<string, unknown>): Promise<{ content: Arra
                 return { content: [{ type: 'text', text: `✓ Log entry #${e.id} written (${e.level}: ${e.message})` }] };
             }
             return { content: [{ type: 'text', text: '✓ Entry written' }] };
+        }
+
+        case 'control_get':
+        case 'control_set': {
+            const controls = result.controls ?? {};
+            const keys = Object.keys(controls);
+            const setPrefix = action === 'control_set'
+                ? `✓ Set ${args.id} = ${String(args.value)}\n\n`
+                : '';
+            if (keys.length === 0) {
+                return { content: [{ type: 'text', text: setPrefix + 'No controls defined yet (the source defines them).' }] };
+            }
+            let msg = setPrefix + `# Controls (${keys.length})\n\n`;
+            for (const k of keys.sort()) msg += `- \`${k}\` = ${String(controls[k])}\n`;
+            return { content: [{ type: 'text', text: msg.trimEnd() }] };
         }
 
         default:

@@ -14,9 +14,10 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import BetterSqlite3 from 'better-sqlite3';
 import { LogBuffer } from './log-buffer.js';
 import { PanelStore } from './panel-store.js';
+import { ControlStore } from './control-store.js';
 import { broadcastLogEntry, broadcastPanelUpdate, broadcastPanelClear } from '../viewer/server.js';
 import type { LogEntry, LogLevel, LogConfig, LogStats, LogHttpEntry } from './log-types.js';
-import type { PanelHttpEntry } from './panel-types.js';
+import { CONTROL_TYPES, type PanelHttpEntry, type WidgetType } from './panel-types.js';
 
 const VALID_LEVELS = new Set<string>(['debug', 'info', 'warn', 'error']);
 const BODY_LIMIT = '64kb';
@@ -38,6 +39,7 @@ let logServer: Server | null = null;
 let logBuffer: LogBuffer | null = null;
 let logConfig: LogConfig | null = null;
 let panelStore: PanelStore | null = null;
+let controlStore: ControlStore | null = null;
 
 // Optional DB persistence
 let logDb: BetterSqlite3.Database | null = null;
@@ -54,6 +56,7 @@ export function initLogHub(config: LogConfig): Promise<string> {
     logBuffer = new LogBuffer(config.bufferSize);
     logConfig = config;
     panelStore = new PanelStore();
+    controlStore = new ControlStore();
 
     // Optional DB persistence
     if (config.persist && config.path) {
@@ -139,8 +142,37 @@ export function initLogHub(config: LogConfig): Promise<string> {
         const body = (req.body ?? {}) as { id?: string };
         const id = typeof body.id === 'string' ? body.id : undefined;
         if (panelStore) panelStore.clear(id);
+        if (controlStore) controlStore.clear(id);   // controls live alongside widgets
         broadcastPanelClear(id);
         res.status(200).json({ cleared: id ?? 'all' });
+    });
+
+    // ── Control back-channel (interactive slider/number widgets) ─────────────
+    // Generic, source-agnostic. The viewer POSTs here when the user changes a
+    // control; sources GET the flat id→value map at their own pace. The store
+    // knows nothing about what a value means — see control-store.ts.
+
+    // POST /control — set one control's value. body: { id, value }.
+    // Updates the store AND the widget's displayed value (so every connected
+    // viewer reflects the change), then the owning source picks it up via GET.
+    app.post('/control', (req, res) => {
+        const body = (req.body ?? {}) as { id?: string; value?: number | string };
+        if (!controlStore || typeof body.id !== 'string' || body.value === undefined) {
+            res.status(400).json({ error: 'control requires { id, value }' });
+            return;
+        }
+        // Same setter the MCP tool uses — store + widget mirror + broadcast.
+        if (!setControl(body.id, body.value)) {
+            res.status(400).json({ error: 'invalid control id or value' });
+            return;
+        }
+        res.status(200).json({ id: body.id.trim(), value: body.value });
+    });
+
+    // GET /control — the whole store as a flat { id: value } object. This is
+    // what a source (e.g. the ESP32) polls to learn the current set-points.
+    app.get('/control', (_req, res) => {
+        res.status(200).json(controlStore ? controlStore.getAll() : {});
     });
 
     // POST /blob — assemble a binary file from base64 chunks.
@@ -264,6 +296,7 @@ export function freeLogHub(): string {
     logBuffer = null;
     logConfig = null;
     panelStore = null;
+    controlStore = null;
 
     console.error('[LogHub] Server stopped');
     return `Log Hub stopped (port ${port} freed)`;
@@ -288,6 +321,38 @@ export function getLogBuffer(): LogBuffer | null {
  */
 export function getPanelStore(): PanelStore | null {
     return panelStore;
+}
+
+/**
+ * Get the control store (for the viewer's snapshot-on-connect and MCP reads)
+ */
+export function getControlStore(): ControlStore | null {
+    return controlStore;
+}
+
+/**
+ * Set ONE control value — the single source of truth for changing a control.
+ * BOTH entry points use it: the HTTP route (POST /control, driven by the
+ * dashboard) and the MCP tool (aidex_log control_set, driven by the AI). It
+ * updates the store, mirrors the value into the widget so every viewer's
+ * slider/number reflects it, and broadcasts that widget. Returns false on a
+ * bad id/value or when the hub isn't running.
+ */
+export function setControl(id: string, value: number | string): boolean {
+    if (!controlStore) return false;
+    if (!controlStore.set(id, value)) return false;
+    // Mirror into the widget (value-only update; won't create one) so the
+    // slider position and any other connected viewer stay in sync.
+    const widget = panelStore?.upsert({ id, value });
+    if (widget) broadcastPanelUpdate(widget);
+    return true;
+}
+
+/**
+ * Read all control values as a flat { id: value } map (for the MCP tool).
+ */
+export function getControlValues(): Record<string, number | string> {
+    return controlStore ? controlStore.getAll() : {};
 }
 
 /**
@@ -344,6 +409,14 @@ function ingestPanel(body: PanelHttpEntry) {
     if (!panelStore) return null;
     const widget = panelStore.upsert(body);
     if (!widget) return null;
+    // When a source DEFINES an interactive control (slider/number), seed the
+    // control store with its starting value — but only if the store has no value
+    // for it yet. That way a re-defining source (e.g. the ESP32 re-announcing its
+    // widgets after a reboot) does NOT clobber a value the user already dialed in.
+    if (controlStore && CONTROL_TYPES.has(widget.type as WidgetType)
+        && typeof widget.value === 'number' && controlStore.get(widget.id) === undefined) {
+        controlStore.set(widget.id, widget.value);
+    }
     broadcastPanelUpdate(widget);
     return widget;
 }

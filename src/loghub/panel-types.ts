@@ -9,7 +9,17 @@
  * Sibling of log-types.ts — same HTTP-ingest → broadcast flow.
  */
 
-export type WidgetType = 'label' | 'progress' | 'gauge' | 'plot';
+// Display widgets are written BY a source and only rendered by AiDex.
+// `slider` and `number` are INTERACTIVE: the viewer renders an input the user
+// can change, and the new value flows back to the source via the Control Store
+// (POST /control → GET /control). They reuse the same fields (min/max/value/
+// step/label/group/order) — the only difference is the viewer makes them
+// editable. Like everything else here: the SENDER decides, AiDex only renders.
+export type WidgetType = 'label' | 'progress' | 'gauge' | 'plot' | 'slider' | 'number';
+
+// Interactive types whose value the user can change in the viewer. Kept as a
+// runtime set so both the store and the viewer agree on "is this a control?".
+export const CONTROL_TYPES = new Set<WidgetType>(['slider', 'number']);
 
 /**
  * HTTP body for POST /panel (and array of these for POST /panels).
@@ -24,6 +34,7 @@ export interface PanelHttpEntry {
     unit?: string;
     min?: number;
     max?: number;
+    step?: number;          // slider/number: increment per tick (default 1)
     warn?: number;          // threshold → yellow zone (gauge/progress)
     crit?: number;          // threshold → red zone (gauge/progress)
     color?: string;         // accent name (cyan/green/orange/...) or hex
@@ -55,6 +66,7 @@ export interface PanelWidget {
     unit?: string;
     min: number;
     max: number;
+    step?: number;              // slider/number: increment per tick (default 1)
     warn?: number;
     crit?: number;
     color?: string;

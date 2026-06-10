@@ -11,7 +11,7 @@
 
 import type { PanelHttpEntry, PanelWidget, WidgetType } from './panel-types.js';
 
-const VALID_TYPES = new Set<WidgetType>(['label', 'progress', 'gauge', 'plot']);
+const VALID_TYPES = new Set<WidgetType>(['label', 'progress', 'gauge', 'plot', 'slider', 'number']);
 const PLOT_HISTORY = 200;          // samples kept per plot widget
 const MAX_FRAME_SAMPLES = 4096;    // cap when a full array frame is sent
 const MAX_WIDGETS = 500;           // safety cap on distinct widget ids
@@ -54,6 +54,7 @@ export class PanelStore {
         if (typeof body.unit === 'string') w.unit = body.unit;
         if (typeof body.min === 'number') w.min = body.min;
         if (typeof body.max === 'number') w.max = body.max;
+        if (typeof body.step === 'number') w.step = body.step;
         if (typeof body.warn === 'number') w.warn = body.warn;
         if (typeof body.crit === 'number') w.crit = body.crit;
         if (typeof body.color === 'string') w.color = body.color;
