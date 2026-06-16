@@ -724,6 +724,35 @@ Invoke-RestMethod -Uri http://localhost:3335/log -Method POST -ContentType "appl
 - **Viewer integration**: Logs tab with WebSocket live-stream, level/source/text filters, auto-scroll
 - **Fire & forget**: Just POST and go — if the server isn't running, the POST silently fails
 
+## Control API — let the AI *drive* your app
+
+Logs and dashboard widgets flow **app → AI**. The **Control API** is the return channel: **AI → app**. It turns the Log Hub into a tiny, zero-dependency command bus — so an AI assistant can drive any running program *without you writing a server*.
+
+The AI sets a command; your app polls for it, runs it, and posts the result back:
+
+```
+AI ──control_set {id,cmd}──→  Hub  ←──GET /control──  Your App (polls ~1s)
+AI ←──control_get──── result ─ Hub  ←──POST /control── runs it, posts result + ack
+```
+
+- **`control_set { id, value }`** — the AI (or a Viewer slider) sets a control slot.
+- **`GET /control`** — your app reads all current control values.
+- **`POST /control`** — your app writes back results / acknowledgements.
+- **`control_get`** — the AI reads what the app reported.
+
+Two slots by convention give you full request/response: a `*_cmd` slot the AI writes, a `*_result` slot the app writes, and an `*_ack` counter so each command runs **exactly once** (bump the command `id` every time; the app skips any `id` it has already handled).
+
+That's the whole protocol. A client needs nothing but an HTTP library you already have.
+
+### Real example — an AI controlling Autodesk Fusion 360
+
+A ~30-line Fusion 360 add-in (`urllib` only, no SDK) polls `GET /control`, executes the command on Fusion's main thread, and posts the result back. With nothing else, an AI assistant drove Fusion to **parametrically design a complete 3D enclosure** — sketches, extrusions, screw-boss domes with heat-set inserts, USB-C cut-outs, reset/button holes — verifying every step by reading back the actual face geometry.
+
+The pattern is universal: anything that can POST and GET — Blender, a CNC controller, a game, a home-automation hub — becomes AI-steerable with a few lines and no bespoke server. Two safety rules carry over from that build:
+
+- **Single-thread GUI APIs:** the poll loop must never touch the app API directly. Fire an event and run the command on the main thread (the official Fusion pattern; the same holds for any non-thread-safe UI/COM API).
+- **Idempotency:** track the last handled `id` and ack it — polling means you'll see the same command repeatedly, so skip what you've already done.
+
 ## Debug Dashboard
 
 The scrolling log stream is great for *what happened when* — but useless for fast, repeating values (audio levels, buffer fill, FPS, sensor readings). The **Debug Dashboard** is the opposite: a fixed-slot panel where each value has a permanent spot and **overwrites in place** instead of scrolling away. Live in the Viewer's **Debug tab**, styled like a hardware monitor (MSI Afterburner / HWiNFO).
