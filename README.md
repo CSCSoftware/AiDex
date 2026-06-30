@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/aidex-mcp.svg)](https://www.npmjs.com/package/aidex-mcp)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-brightgreen.svg)](https://nodejs.org/)
+[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-brightgreen.svg)](https://nodejs.org/)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-blue.svg)](https://modelcontextprotocol.io/)
 [![GitHub Discussions](https://img.shields.io/github/discussions/CSCSoftware/AiDex?label=Discussions&logo=github)](https://github.com/CSCSoftware/AiDex/discussions)
 
@@ -249,8 +249,8 @@ The index lives in `.aidex/index.db` (SQLite) - fast, portable, no external depe
 
 ### Prerequisites
 
-- **Node.js ≥ 18** (check with `node --version`)
-  - macOS: `brew install node` or `nvm install 18 && nvm use 18`
+- **Node.js ≥ 20** (check with `node --version`)
+  - macOS: `brew install node` or `nvm install 20 && nvm use 20`
   - Linux: use your package manager or [nvm](https://github.com/nvm-sh/nvm)
   - Windows: [nodejs.org](https://nodejs.org/)
   - If you use `nvm`, the repo ships a `.nvmrc` — `nvm use` picks the right version automatically.

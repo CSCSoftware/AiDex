@@ -12,16 +12,16 @@
  *   node build/index.js viewer <path>         - Open interactive Viewer in the browser
  */
 
-// Node >=18 is required (better-sqlite3 native bindings, fs.cpSync, etc.).
+// Node >=20 is required (better-sqlite3 v12 native bindings, fs.cpSync, etc.).
 // npm only warns on `engines` mismatches — we enforce it at runtime so users
 // on older Node versions get an immediate, actionable error instead of an
 // opaque native-module crash later.
 {
     const major = parseInt(process.versions.node.split('.')[0], 10);
-    if (Number.isNaN(major) || major < 18) {
+    if (Number.isNaN(major) || major < 20) {
         process.stderr.write(
-            `AiDex requires Node.js 18 or newer. You are running ${process.version}.\n` +
-            `  macOS:  brew install node  (or: nvm install 18 && nvm use 18)\n` +
+            `AiDex requires Node.js 20 or newer. You are running ${process.version}.\n` +
+            `  macOS:  brew install node  (or: nvm install 20 && nvm use 20)\n` +
             `  Linux:  use your package manager or nvm (https://github.com/nvm-sh/nvm)\n` +
             `  Windows: https://nodejs.org/\n`
         );

@@ -2,6 +2,18 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [2.2.1] - 2026-06-30
+
+Install fix. On **Node.js 24**, `npm install -g aidex-mcp` failed for many users with `node-gyp` errors — they had to install a full C++ toolchain (Visual Studio Build Tools on Windows, the Xcode sysroot on macOS) just to build `better-sqlite3` from source. Fixes [#13](https://github.com/CSCSoftware/AiDex/issues/13).
+
+### Fixed
+
+- **`better-sqlite3` build-from-source on Node 24** — `better-sqlite3@^11` ships no prebuilt binary for Node 24 (ABI `node-v137`), so `prebuild-install` fell through to `node-gyp rebuild`, which needs a local C/C++ toolchain most users don't have. Bumped to **`better-sqlite3@^12`**, which adds Node 24 (and newer) prebuilds — the install now downloads a ready binary on every supported platform, no compiler required. No API changes; the database layer is untouched.
+
+### Changed
+
+- **Minimum Node.js is now 20** (was 18). `better-sqlite3@12` dropped end-of-life Node 18 from its build matrix, so that is the new floor. `engines`, `.nvmrc`, the runtime version check (`src/index.ts`), and the README are aligned. Node 18 is itself past EOL.
+
 ## [2.2.0] - 2026-06-30
 
 Feature release. Turns the Debug Dashboard from a one-way display into a two-way control surface: a source can now expose **interactive sliders/numbers** whose values flow *back* to it, and both the user and the AI can tune a running program live. Also gives plots sender-controlled Y-axis scaling, separates a gauge LED's colour from its text, stops dashboard flicker, and trims the npm package.

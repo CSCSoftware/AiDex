@@ -1,6 +1,6 @@
 {
   "name": "aidex-mcp",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "mcpName": "io.github.CSCSoftware/aidex",
   "description": "MCP Server for persistent code indexing. Gives AI assistants (Claude, Gemini, Copilot, Cursor) instant access to your codebase. 50x less context than grep.",
   "main": "build/index.js",
@@ -63,7 +63,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@tree-sitter-grammars/tree-sitter-hcl": "^1.2.0",
-    "better-sqlite3": "^11.0.0",
+    "better-sqlite3": "^12.0.0",
     "chokidar": "^5.0.0",
     "express": "^4.22.1",
     "glob": "^10.0.0",
@@ -99,7 +99,7 @@
     "typescript": "^5.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "pnpm": {
     "autoInstallPeers": true,
