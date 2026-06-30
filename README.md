@@ -50,7 +50,7 @@ AiDex is an MCP server that gives AI coding assistants a memory, semantic search
 | **Screenshots** | `screenshot`, `windows` | Cross-platform screen capture with LLM optimization — scale + color reduction saves up to 95% tokens |
 | **Viewer** | `viewer` | Interactive browser UI with file tree, signatures, tasks, logs, search, and live reload |
 
-**12 languages** — C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby, HCL/Terraform
+**12 languages** — C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby, HCL/Terraform — plus Astro frontmatter
 
 <details>
 <summary><strong>Quick Examples</strong> — see it in action</summary>
@@ -244,6 +244,7 @@ The index lives in `.aidex/index.db` (SQLite) - fast, portable, no external depe
 | PHP | `.php` |
 | Ruby | `.rb`, `.rake` |
 | HCL/Terraform | `.tf`, `.tfvars`, `.hcl` |
+| Astro | `.astro` (TypeScript frontmatter) |
 
 ## Quick Start
 
@@ -390,7 +391,7 @@ Do I want to search code?
 | Screenshots | `aidex_screenshot`, `aidex_windows` | Screen capture with LLM optimization (scale + color reduction, no index needed) |
 | Viewer | `aidex_viewer` | Interactive browser UI with file tree, signatures, tasks, and live logs |
 
-**12 languages:** C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby, HCL/Terraform
+**12 languages:** C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby, HCL/Terraform — plus Astro frontmatter
 
 ### Session Notes
 

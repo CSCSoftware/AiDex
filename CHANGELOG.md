@@ -2,6 +2,14 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [2.2.2] - 2026-06-30
+
+Community contribution. Adds Astro component support.
+
+### Added
+
+- **`.astro` file support** ([#15](https://github.com/CSCSoftware/AiDex/pull/15), thanks [@zlegein](https://github.com/zlegein)) — Astro components are now indexed by parsing their TypeScript frontmatter (the code between the `---` fences) with the existing TSX grammar. The template/markup below the frontmatter is skipped. Line numbers are preserved exactly: template lines are blanked (not removed) before parsing, so every reported method/type position matches the original file. No new dependency — reuses the bundled TypeScript grammar.
+
 ## [2.2.1] - 2026-06-30
 
 Install fix. On **Node.js 24**, `npm install -g aidex-mcp` failed for many users with `node-gyp` errors — they had to install a full C++ toolchain (Visual Studio Build Tools on Windows, the Xcode sysroot on macOS) just to build `better-sqlite3` from source. Fixes [#13](https://github.com/CSCSoftware/AiDex/issues/13).
