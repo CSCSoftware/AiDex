@@ -43,7 +43,12 @@ einem anderen Prinzip:
   Der Empfänger ist reines HTTP — **kein SDK, keine Bibliothek, kein Build-Schritt.**
   Ein `curl` reicht.
 
-`[BILD: Dashboard-Gesamtansicht mit allen Widget-Typen — GeminiPod]`
+![Das Debug-Dashboard in Betrieb — drei AEC-Waveform-Plots, Gauges und interaktive Tuning-Slider](loghub-dashboard.png)
+
+> ▶️ **In Bewegung:** [loghub-dashboard.gif](loghub-dashboard.gif) zeigt das Dashboard live —
+> die Tuning-Slider werden verstellt und die Waveform-Plots reagieren in Echtzeit.
+> (Volles Video: [loghub-dashboard.mp4](loghub-dashboard.mp4).) Das gezeigte Board ist
+> eine AEC-Tuning-Konsole nach dem Vorbild des GeminiPod-Satelliten.
 
 ---
 
@@ -147,7 +152,11 @@ curl -X POST http://localhost:3335/panel \
 curl http://localhost:3335/control
 ```
 
-`[BILD: Slider im Viewer, Wert wird verschoben]`
+![Tuning-Slider werden verstellt, die Waveform-Plots reagieren live](loghub-dashboard.gif)
+
+*Die `4 Tuning`-Slider unten werden verschoben (Speaker volume, AEC ref boost …) — die
+Plots in `1 AEC` reagieren sofort. Genau dieser Rückkanal ist gemeint: der Wert fließt
+vom Viewer zurück an die Quelle.*
 
 ---
 

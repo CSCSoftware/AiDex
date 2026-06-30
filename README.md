@@ -876,18 +876,35 @@ Opens `http://localhost:3333` with:
 - **File signatures** - Click any file to see its types and methods
 - **Live reload** - Changes detected automatically while you code
 - **Git status icons** - See which files are modified, staged, or untracked
+- **Search tab** - Semantic / exact / hybrid search across code, docs, tasks & notes, with the optional LLM layer (translate + rerank)
+- **Debug tab** - Live Debug Dashboard: fixed-slot widgets (plots, gauges, progress) plus interactive sliders that drive a running program back through the `/control` channel
 - **Logs tab** - Live log stream from Log Hub with filters (level, source, text search)
 - **Tasks tab** - View and manage your task backlog
+- **Settings tab** - Configure embeddings & the LLM provider (privacy switch defaults to off)
+
+### Debug Dashboard — live, two-way
+
+The Debug tab is a live dashboard with fixed slots: send the same `id` again and the value updates **in place** instead of scrolling away. Interactive `slider`/`number` widgets flow back to the source (HTTP `/control`, or `aidex_log control_set` so the AI can tune a running program too). Full guide: [docs/loghub-panel-dashboard.md](docs/loghub-panel-dashboard.md).
+
+![AiDex Debug Dashboard - live AEC tuning console](docs/loghub-dashboard.png)
+
+The sliders react in real time — [watch the GIF](docs/loghub-dashboard.gif):
+
+![Tuning sliders drive the live waveform plots](docs/loghub-dashboard.gif)
+
+### The rest of the Viewer
+
+![AiDex Viewer - Semantic & hybrid search](docs/viewer-search.png)
+
+![AiDex Viewer - Settings (embeddings & LLM)](docs/viewer-settings.png)
+
+![AiDex Viewer - Tasks](docs/viewer-tasks.png)
+
+![AiDex Viewer - Code signatures](docs/viewer-code.png)
 
 ![AiDex Viewer - Signatures](docs/aidex-viewer.png)
 
 ![AiDex Viewer - Overview](docs/aidex-viewer-overview.png)
-
-![AiDex Viewer - Code](docs/aidex-viewer-code.png)
-
-![AiDex Viewer - Tasks](docs/aidex-viewer-tasks.png)
-
-![AiDex Viewer - Logs](docs/aidex-viewer-logs.png)
 
 Close with `aidex_viewer({ path: ".", action: "close" })`
 
