@@ -2,6 +2,32 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [2.2.0] - 2026-06-30
+
+Feature release. Turns the Debug Dashboard from a one-way display into a two-way control surface: a source can now expose **interactive sliders/numbers** whose values flow *back* to it, and both the user and the AI can tune a running program live. Also gives plots sender-controlled Y-axis scaling, separates a gauge LED's colour from its text, stops dashboard flicker, and trims the npm package.
+
+### Added
+
+- **Interactive controls + `/control` back-channel** — two new widget types, **`slider`** and **`number`**, are editable in the viewer; when the user changes one, the new value flows back to the source. This is the first path on which data travels *from* AiDex *to* the program (everything else is source → AiDex). The mechanism is a deliberately dumb, source-agnostic `{ id: value }` store — it knows nothing about what a value means.
+  - HTTP: `POST /control` (set one value, mirrors it onto the card and broadcasts to every viewer) and `GET /control` (the whole store as a flat `{ id: value }` map, which the source polls at its own pace to learn the current set-points). Cleared together with their widgets via `POST /panel/clear` — there is no separate control-clear endpoint.
+  - **MCP: the AI can drive controls too.** `aidex_log` gains `control_get` (read all control values) and `control_set` (change one — the *same* set-point the user's dashboard slider drives). So Claude can tune a live program — e.g. a barge-in threshold, a gain, a sample rate — and watch the effect, without touching the source.
+  - New `step` field (slider/number increment per tick, default 1). New file: `src/loghub/control-store.ts`. First real consumer: the GeminiPod (ESP32) barge-in tuning; the same API works unchanged from C#, Python, or shell.
+- **Sender-controlled plot Y-axis** — three new plot fields, all decided by the sender (the renderer only renders):
+  - **`scale`** — `"linear"` (default) or `"log"`. Logarithmic scaling suits high-dynamic signals like audio levels, where quiet speech and a loud peak need to be visible at once. Bounds are lifted to ≥ 1.
+  - **`autoMin`** — the plot's lower bound follows the data minimum (the ceiling stays fixed at `max`), so a noise floor sits at the bottom edge and the full plot height goes to the signal above it.
+  - **`decimals`** — decimal places in the footer (cur/min/max/avg); `0` for integers. The recipe that finally made an audio-level plot readable across the whole loudness range: `scale:"log"` + `autoMin:true` + fixed `max` + `decimals:0`.
+- **Panel-Dashboard user guide** (`docs/loghub-panel-dashboard.md`) — full walkthrough: stream vs. dashboard, quickstart, the complete HTTP API (display + control back-channel), all six widget types, a field reference checked against `panel-types.ts`, plot-scaling deep-dive, best practices from real (ESP32) use, and an end-to-end audio-dashboard example.
+
+### Changed
+
+- **Gauge LED colour separated from its text** — a new `state` field drives a gauge's LED colour (`"ok"`/`"warn"`/`"error"`/…) independently of `value`, which stays the free display text. Previously the status word *was* the displayed text, so you were stuck looking at a literal "WARN"/"OK". Now the LED can be red while the card shows whatever text you want.
+- **npm package trimmed** — `.npmignore` now ships only `build/` plus the postinstall hook; `docs/`, the `CHANGELOG`, test scripts, and source are excluded from the published tarball. Smaller install, nothing functional removed. (`scripts/verify-package.ps1`, `scripts/check-npm-auth.ps1` updated to match.)
+
+### Fixed
+
+- **Dashboard no longer flickers on unchanged values** — `updateCardValue` re-rendered (and flashed) label/progress/gauge cards on every sample, even when the value was identical, causing constant flicker at high update rates. Cards now redraw only when the value actually changes.
+- **`aidex_global_guideline` `list` token overflow** — `list` dumped the *full text* of every guideline (~1,246 lines / 68 KB for 15 guidelines), overflowing the MCP tool result so the content spilled to the swap file instead of the chat, making the overview unusable. `list` now renders a compact one-line-per-guideline index (`key — short description (updated date)`) via a new `summarizeGuideline()` helper; use `get` with a key to read the full text. 1,246 → 17 lines.
+
 ## [2.1.2] - 2026-06-02
 
 Feature + stability release. Adds the live **Debug Dashboard** and closes the WebSocket memory leak the v2.1.0/2.1.1 fixes had missed.

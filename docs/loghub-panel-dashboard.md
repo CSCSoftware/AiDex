@@ -1,10 +1,5 @@
 # LogHub Panel-Dashboard — Anleitung
 
-> **Status: GERÜST.** Texte mit `[AUSFORMULIEREN]`, Bilder mit `[BILD: …]`, Code mit
-> `[BEISPIEL: …]` markiert. Single Source of Truth für die Feld-Referenz ist
-> `src/loghub/panel-types.ts` (`PanelHttpEntry`). Quelle der HTTP-Endpunkte:
-> `src/loghub/log-server.ts`.
->
 > 🌐 **Generisch — keine Plattform vorausgesetzt.** Das Dashboard ist eine reine
 > HTTP-Schnittstelle. Quelle kann **alles** sein, was POSTs senden kann: ein
 > Python-Skript, eine C#-/WinForms-App, ein Node-Server, Shell + `curl`, der
@@ -13,27 +8,40 @@
 > für eine Quelle — keine Voraussetzung. Bilder-Quelle ist zufällig das
 > GeminiPod-Dashboard (ESP32 „Sophia"), weil es viele Widget-Typen gleichzeitig zeigt.
 >
-> ⚠️ **Beim Ausformulieren beachten — Gerüst war veraltet:** Der Code kennt
-> inzwischen **zwei interaktive Widget-Typen** (`slider`, `number`) mit einem
-> **Rückkanal** (`POST /control` / `GET /control`) und das Feld `step`. Diese
-> Sektionen (3b, 4, 5) sind hier neu ergänzt und gegen den Code abgeglichen
-> (Stand 2026-06-11). Alte Notizen, die nur 4 Typen kennen, sind überholt.
+> 📎 **Single Source of Truth** für die Feld-Referenz ist `src/loghub/panel-types.ts`
+> (`PanelHttpEntry`); die HTTP-Endpunkte stehen in `src/loghub/log-server.ts`. Wenn
+> der Code sich ändert, gilt der Code — diese Seite nachziehen.
 
 ---
 
 ## 1. Was ist das Panel-Dashboard?
 
-`[AUSFORMULIEREN]`
-- Der Logs-Tab im Viewer hat **zwei Ansichten**: den scrollenden Log-Stream **und**
-  das Panel-Dashboard.
-- Panel = feste, per `id` adressierte Kacheln. Gleiche `id` erneut senden → Wert wird
-  **in place überschrieben** (kein Wegscrollen). Gedacht für hochfrequente/wiederholte
-  Werte: Audio-Pegel, Puffer-Füllstand, FPS, Heap, RSSI, Status-LEDs.
-- **Zwei Richtungen:** Anzeige-Widgets (Quelle → AiDex) **und** interaktive Controls
-  (`slider`/`number`), deren Wert der User im Viewer ändert und die zurück an die
-  Quelle fließen (→ Sektion 3b). Grundprinzip durchgängig: **der Sender entscheidet,
-  AiDex rendert nur.**
-- Zero-cost wenn nicht genutzt. Empfänger ist HTTP — **keine Library nötig.**
+Der **Log-Stream** im Viewer ist eine Chronik: jede Zeile scrollt nach oben weg.
+Das ist perfekt für Ereignisse („Verbindung aufgebaut", „Datei geladen", „Fehler X"),
+aber unbrauchbar für **Werte, die sich ständig ändern**. Ein Audio-Pegel, der 50-mal
+pro Sekunde gemeldet wird, würde den Stream fluten und wäre trotzdem nie ablesbar.
+
+Genau dafür ist das **Panel-Dashboard** da. Es ist die zweite Ansicht im selben
+Logs-Tab (oben umschaltbar zwischen *Stream* und *Dashboard*) und funktioniert nach
+einem anderen Prinzip:
+
+- **Feste Kacheln statt Scroll.** Jedes Widget hat eine `id`. Sendest du dieselbe `id`
+  erneut, wird der Wert **an Ort und Stelle überschrieben** — die Kachel bleibt stehen,
+  nur die Zahl/der Balken aktualisiert sich. Damit kannst du beliebig hochfrequent
+  senden, ohne irgendetwas zuzumüllen.
+- **Gedacht für laufende Messwerte:** Audio-Pegel, Puffer-Füllstand, FPS, freier Heap,
+  WLAN-RSSI, Temperatur, Status-LEDs — alles, was du normalerweise nur mühsam aus
+  Log-Zeilen herauslesen würdest.
+- **Zwei Richtungen.** Die meisten Widgets sind **Anzeige** (Quelle → AiDex). Zwei
+  Typen — `slider` und `number` — sind **interaktiv**: AiDex rendert ein Eingabefeld,
+  der User dreht daran, und der neue Wert fließt **zurück an die Quelle** (→ Sektion 3b).
+  Damit steuert man eine laufende App live vom Browser aus.
+- **Durchgängiges Prinzip: der Sender entscheidet, AiDex rendert nur.** Skala, Farbe,
+  Einheit, Nachkommastellen — all das bestimmt die Quelle. Der Viewer hat keine eigene
+  Logik, er zeigt an, was ankommt.
+- **Zero-cost und library-frei.** Solange du nichts sendest, existiert kein Widget.
+  Der Empfänger ist reines HTTP — **kein SDK, keine Bibliothek, kein Build-Schritt.**
+  Ein `curl` reicht.
 
 `[BILD: Dashboard-Gesamtansicht mit allen Widget-Typen — GeminiPod]`
 
@@ -41,62 +49,112 @@
 
 ## 2. Schnellstart (3 Schritte)
 
-`[AUSFORMULIEREN]`
-1. **LogHub starten:** `aidex_log({ action: "init" })` → HTTP-Server auf Port **3335**.
-2. **Viewer öffnen:** `aidex_viewer({ path: "." })` → Browser, Logs-Tab → Dashboard.
-3. **Erstes Widget** definieren + Wert senden.
+1. **LogHub starten** — der HTTP-Empfänger läuft auf Port **3335**:
 
-`[BEISPIEL: curl — ein label-Widget anlegen und einen Wert setzen]`
+   ```
+   aidex_log({ action: "init" })
+   ```
+
+2. **Viewer öffnen** und auf den Logs-Tab → *Dashboard* umschalten:
+
+   ```
+   aidex_viewer({ path: "." })
+   ```
+
+3. **Erstes Widget senden.** Ein `POST /panel` legt die Kachel an *und* setzt den Wert
+   in einem Aufruf (Upsert). Hier eine einfache Text-Kachel:
+
+   ```bash
+   curl -X POST http://localhost:3335/panel \
+     -H "Content-Type: application/json" \
+     -d '{"id":"status","type":"label","value":"running","group":"Demo","label":"State"}'
+   ```
+
+   Die Kachel „State" erscheint sofort im Dashboard. Schickst du denselben `id` noch
+   einmal mit einem anderen `value`, ändert sich nur der angezeigte Text — die Kachel
+   bleibt:
+
+   ```bash
+   curl -X POST http://localhost:3335/panel \
+     -H "Content-Type: application/json" \
+     -d '{"id":"status","value":"paused"}'
+   ```
+
+   > Beim zweiten Aufruf fehlt `type` — das ist Absicht. `type` braucht nur das **erste**
+   > Senden zum Anlegen; danach genügen `id` + `value` fürs Update.
+
 `[BILD: leeres Dashboard → erstes Widget erscheint]`
 
 ---
 
 ## 3. HTTP-API
 
+Alles läuft über `http://localhost:3335`. Jeder Request ist `Content-Type:
+application/json`. Es gibt keine Authentifizierung und keinen Zustand zwischen
+Verbindungen — jeder POST steht für sich.
+
 ### 3a. Anzeige-Endpunkte
-`[AUSFORMULIEREN]`
 
 | Methode & Pfad | Zweck |
 |---|---|
-| `POST /panel`   | Ein Widget (Definition **oder** Wert-Update — beides per upsert). |
-| `POST /panels`  | Array von Widgets in einem Rutsch (Batch, effizient). |
-| `POST /panel/clear` | Body `{}` = alle löschen, `{"id":"x"}` = eines. |
-| `GET /health`   | Status-Check. |
+| `POST /panel`   | Ein Widget anlegen **oder** aktualisieren (beides per Upsert über die `id`). |
+| `POST /panels`  | Array von Widgets in einem Rutsch (Batch — ein POST pro Dashboard-Tick). |
+| `POST /panel/clear` | Body `{}` = **alle** Widgets löschen, `{"id":"x"}` = nur eines. Räumt zugehörige Controls mit weg (s.u.). |
+| `GET /health`   | Status-Check (Server lebt, Buffer-Auslastung). |
 
-- **Muster:** erst Definitionen (mit `type`/`group`/`label`/Skala) senden, dann laufend
-  nur noch `{"id":…, "value":…}`-Updates. Upsert: `type` ist nur zum **Erstellen** nötig,
-  Folge-Updates dürfen es weglassen.
-- **Unbekannte JSON-Felder werden verworfen** — nur explizit unterstützte Felder
-  (siehe Sektion 5) landen im Store. Kein stiller Fehler, aber auch kein Effekt.
+- **Arbeitsmuster:** einmal alle **Definitionen** senden (mit `type`, `group`, `label`,
+  Skala/Farbe), danach im Betrieb nur noch schlanke `{"id":…, "value":…}`-Updates.
+  Weil `POST /panel` ein Upsert ist, braucht das Update kein `type` mehr.
+- **Unbekannte JSON-Felder werden still verworfen.** Nur die in Sektion 5 gelisteten
+  Felder landen im Store. Ein Tippfehler im Feldnamen ist also kein Fehler, hat aber
+  auch keine Wirkung — im Zweifel die Feld-Referenz gegenchecken.
 
-### 3b. Control-Rückkanal (interaktive Widgets) — NEU
-`[AUSFORMULIEREN]`
+### 3b. Control-Rückkanal (interaktive Widgets)
 
-Für `slider`/`number`-Widgets fließt der vom User im Viewer geänderte Wert zurück an
-die Quelle. Generisch und quell-agnostisch — der Store weiß nichts über die Bedeutung
-des Werts.
+Die Widget-Typen `slider` und `number` sind **interaktiv**: AiDex rendert ein
+Eingabefeld, und wenn der User es verstellt, fließt der neue Wert **zurück an die
+Quelle**. Das ist der einzige Weg, auf dem Daten von AiDex zurück zur App laufen —
+ansonsten ist alles Einbahnstraße (Quelle → AiDex). Der Mechanismus ist bewusst dumm
+und quell-agnostisch: ein flacher `{ id: value }`-Speicher, der nichts über die
+Bedeutung der Werte weiß.
 
 | Methode & Pfad | Zweck |
 |---|---|
-| `POST /control` | Setzt einen Control-Wert. Body `{ id, value }`. Aktualisiert Store **und** die angezeigte Kachel (alle Viewer spiegeln die Änderung). Der Viewer ruft das auf, wenn der User schiebt/tippt. |
-| `GET /control`  | Liefert den ganzen Store als flaches `{ id: value }`-Objekt. **Das pollt die Quelle**, um die aktuellen Set-Points zu lernen. Quelle = irgendein Programm (Skript, App, MCU …) — der Store ist quell-agnostisch. |
+| `POST /control` | Setzt einen Control-Wert. Body `{ id, value }`. Schreibt in den Control-Store **und** spiegelt den Wert auf die Kachel (alle offenen Viewer sehen die Änderung). Das ruft der **Viewer** auf, wenn der User am Regler zieht. |
+| `GET /control`  | Liefert den ganzen Store als flaches `{ id: value }`-Objekt. **Das pollt die Quelle**, um die aktuellen Set-Points zu erfahren. |
 
-- **Fluss:** Quelle definiert ein `slider`-Widget → User schiebt im Viewer →
-  `POST /control` → Quelle holt sich den neuen Wert per `GET /control` im eigenen Takt.
-- Die „Quelle" ist hier dieselbe wie beim Senden der Anzeige-Werte — also ein
-  beliebiges HTTP-fähiges Programm. (Im GeminiPod-Beispiel ist das der ESP32, aber
-  genauso gut ein Python-Loop am PC.)
-- `POST /control/clear` bzw. `POST /panel/clear` räumt Controls mit weg (Controls leben
-  neben den Widgets).
+- **Fluss in vier Schritten:** (1) Quelle definiert ein `slider`-Widget mit Startwert →
+  (2) User schiebt den Regler im Viewer → (3) der Viewer schickt `POST /control` →
+  (4) die Quelle holt sich den neuen Wert per `GET /control` in ihrem eigenen Takt und
+  reagiert darauf (z.B. einen Schwellwert anpassen).
+- **Die Quelle ist dieselbe wie beim Senden der Anzeige-Werte** — irgendein
+  HTTP-fähiges Programm. Im GeminiPod-Beispiel ist es der ESP32, der so seinen
+  Barge-In-Schwellwert live tunen lässt; genauso gut wäre es ein Python-Loop am PC.
+- **Aufräumen:** Es gibt **keinen** eigenen `/control/clear`-Endpunkt. `POST /panel/clear`
+  entfernt das Widget **und** seinen Control-Wert gemeinsam (sie gehören zusammen).
 
-`[BEISPIEL: slider definieren + GET /control pollen — Pseudocode]`
+Ein `slider` anlegen und seinen Wert pollen — minimal mit `curl`:
+
+```bash
+# 1) Control-Widget definieren (Startwert 40, Bereich 0..100, Schrittweite 5)
+curl -X POST http://localhost:3335/panel \
+  -H "Content-Type: application/json" \
+  -d '{"id":"threshold","type":"slider","value":40,"min":0,"max":100,"step":5,"group":"Tuning","label":"VAD-Schwelle"}'
+
+# 2) ... User schiebt den Regler im Viewer ...
+
+# 3) Aktuelle Set-Points abholen — liefert z.B. {"threshold":55}
+curl http://localhost:3335/control
+```
+
 `[BILD: Slider im Viewer, Wert wird verschoben]`
 
 ---
 
 ## 4. Widget-Typen (`type`)
 
-`[AUSFORMULIEREN]`
+Sechs Typen, in zwei Gruppen. Das `type`-Feld wird nur beim **Anlegen** gebraucht;
+danach reicht `id` + `value`.
 
 **Anzeige (Quelle → AiDex):**
 - **`label`** — Text/Zahl als Wert. Mit `state` als farbige LED nutzbar.
@@ -117,8 +175,10 @@ des Werts.
 
 ## 5. Widget-Felder — vollständige Referenz
 
-`[AUSFORMULIEREN: Einleitung]`
-Abgeglichen gegen `PanelHttpEntry` in `src/loghub/panel-types.ts` (Stand 2026-06-11).
+Jedes Feld ist optional außer `id` (immer Pflicht) und `type` (Pflicht **nur beim
+Anlegen**). Was ein Feld bewirkt, hängt vom Widget-Typ ab — die Spalte „Gilt für"
+sagt, wo es wirkt; bei anderen Typen wird es ignoriert. Abgeglichen gegen
+`PanelHttpEntry` in `src/loghub/panel-types.ts`.
 
 | Feld | Typ | Gilt für | Bedeutung |
 |---|---|---|---|
@@ -145,19 +205,30 @@ Abgeglichen gegen `PanelHttpEntry` in `src/loghub/panel-types.ts` (Stand 2026-06
 
 ---
 
-## 6. Plot-Skalierung im Detail (Kern-Learning vom 03.06.)
+## 6. Plot-Skalierung im Detail
 
-`[AUSFORMULIEREN]`
-- **Autoskala (default):** ohne festes `min`/`max` skaliert der Plot auf die History
-  (+10 % Padding). Problem: ein einzelner Riesen-Peak drückt die ganze Kurve platt.
-- **Feste Skala:** `min`+`max` setzen → kein Zappeln bei kleinen Schwankungen; Werte
-  außerhalb werden geclamped (kein Ausreißer aus dem Canvas).
-- **Log-Skala (`scale:"log"`):** für große Dynamik (Audio, dB-artig). Grenzen werden
-  auf ≥ 1 gehoben.
-- **`autoMin`:** gegen das „tote Drittel" unter dem Grundrauschen — der Untergrund
-  klebt unten, volle Plot-Höhe fürs Signal.
-- **Empfehlung Audio-Pegel:** `scale:"log"` + `autoMin:true` + `max`=Vollausschlag +
-  `decimals:0`.
+Der Plot ist der anspruchsvollste Widget-Typ, weil seine Y-Achse über die Lesbarkeit
+entscheidet. Vier Stellschrauben, alle **sender-gesteuert**:
+
+- **Autoskala (Standard).** Lässt du `min`/`max` weg, skaliert der Plot fortlaufend auf
+  den Inhalt der History (+10 % Luft). Bequem — aber ein einzelner Riesen-Peak drückt
+  danach die ganze normale Kurve platt an den unteren Rand.
+- **Feste Skala.** Setzt du `min` **und** `max`, steht die Achse still. Kleine
+  Schwankungen lassen den Plot nicht mehr zappeln, und Werte außerhalb des Bereichs
+  werden geclamped statt aus dem Canvas zu laufen. Erste Wahl, sobald du den
+  Wertebereich kennst.
+- **Log-Skala** (`scale:"log"`). Für Signale mit großer Dynamik — Audio-Pegel, alles
+  dB-artige. Leises Sprechen und ein lauter Peak werden gleichzeitig sichtbar, weil die
+  Achse logarithmisch staucht. Die Grenzen werden dabei auf ≥ 1 gehoben (log von 0 gibt
+  es nicht).
+- **`autoMin`** (`true`). Hebt den „toten" Bereich unterhalb des Grundrauschens weg: die
+  Untergrenze folgt dem tatsächlichen Daten-Minimum (die **Decke** bleibt fest auf
+  `max`). So sitzt das Grundrauschen am unteren Rand und die volle Plot-Höhe steht dem
+  eigentlichen Signal zur Verfügung.
+
+> **Rezept für einen Audio-Pegel-Plot:** `scale:"log"` + `autoMin:true` + `max` =
+> Vollausschlag + `decimals:0`. Das war das Kern-Learning aus dem GeminiPod-Einsatz —
+> erst diese Kombination machte den Mic-Pegel über die ganze Lautstärke-Spanne ablesbar.
 
 `[BILD: Vorher/Nachher — linear-Autoskala (Peak erschlägt alles) vs log+autoMin
 (Rauschen unten, Signal sichtbar)]`
@@ -166,15 +237,21 @@ Abgeglichen gegen `PanelHttpEntry` in `src/loghub/panel-types.ts` (Stand 2026-06
 
 ## 7. Footer (cur/min/max/avg)
 
-`[AUSFORMULIEREN]`
-- Vertikal gestapelt (untereinander) → voll lesbar, kein Abschneiden.
-- `decimals` steuert die Nachkommastellen.
+Jeder Plot zeigt unter der Kurve vier Kennzahlen über die sichtbare History:
+**cur** (aktueller Wert), **min**, **max** und **avg** (Durchschnitt). Sie stehen
+vertikal gestapelt — so werden sie nie abgeschnitten, egal wie schmal die Kachel ist.
+
+Die Anzahl der Nachkommastellen steuerst du mit `decimals`: `0` für ganze Zahlen
+(z.B. Pegel, FPS), `1`–`2` für feinere Größen. Der Footer übernimmt diesen Wert
+automatisch — du musst die Zahlen nicht selbst formatieren.
 
 ---
 
 ## 8. Best Practices / Stolpersteine (aus echtem Einsatz)
 
-`[AUSFORMULIEREN — Stichpunkte stehen, in Fließtext/Tipps gießen]`
+Die folgenden Punkte sind alle aus echtem Dashboard-Betrieb (u.a. dem GeminiPod auf
+ressourcenarmer ESP32-Hardware) entstanden — sie ersparen die typischen ersten Fehler:
+
 - **Definitionen vor Live-Werten:** erst `/panels` mit allen Defs, dann Updates.
 - **Batch nutzen (`/panels`):** EIN POST pro Dashboard-Tick statt vieler einzelner.
 - **Senden vom Echtzeit-Pfad entkoppeln:** HTTP-POSTs blockieren. Aus zeitkritischen
@@ -197,12 +274,59 @@ Abgeglichen gegen `PanelHttpEntry` in `src/loghub/panel-types.ts` (Stand 2026-06
 
 ## 9. Vollständiges Beispiel
 
-`[BEISPIEL: kommentiertes End-to-End-Audio-Pegel-Dashboard]`
-- Definitions-Batch (`POST /panels`) mit allen Widgets inkl. einem `slider` zum
-  Live-Tuning eines Schwellwerts.
-- Zyklische Updates (`POST /panels` pro Tick).
-- `GET /control`-Poll, um den Slider-Wert zu übernehmen.
-- Sprach-agnostisch (reines HTTP, Pseudocode/curl).
+Ein kleines Audio-Pegel-Dashboard, das alle Bausteine zeigt: einmaliges Anlegen aller
+Widgets per Batch (inkl. eines `slider` zum Live-Tuning), zyklische Wert-Updates und
+das Zurücklesen des Slider-Werts. Das Beispiel ist in Python, weil das kompakt liest —
+es ist aber **reines HTTP** und in jeder Sprache identisch (nur die POST-Syntax ändert
+sich).
+
+**Schritt 1 — alle Widgets einmal definieren (`POST /panels`, ein Batch):**
+
+```python
+import requests, time, math
+HUB = "http://localhost:3335"
+
+# Eine Definition pro Widget. Gruppen mit Zahlen-Präfix → feste Reihenfolge.
+requests.post(f"{HUB}/panels", json=[
+    # Plot mit dem Audio-Rezept aus Sektion 6 (log + autoMin + feste Decke).
+    {"id":"mic","type":"plot","group":"1 Audio","label":"Mic Pegel","unit":"dB",
+     "min":0,"max":90,"scale":"log","autoMin":True,"decimals":0,"color":"cyan"},
+    # Balken für die Puffer-Füllung, mit Schwellen für gelb/rot.
+    {"id":"buf","type":"progress","group":"1 Audio","label":"Buffer","unit":"%",
+     "min":0,"max":100,"warn":75,"crit":90},
+    # Status-LED: Farbe kommt aus state, der Text aus value (Sektion 5).
+    {"id":"link","type":"gauge","group":"2 System","label":"Verbindung",
+     "state":"ok","value":"connected"},
+    # Interaktiver Slider — der Wert fließt zurück an dieses Skript (Sektion 3b).
+    {"id":"gain","type":"slider","group":"3 Tuning","label":"Eingangs-Gain",
+     "value":50,"min":0,"max":100,"step":5},
+])
+```
+
+**Schritt 2 — im Betrieb laufend Werte senden und den Slider zurücklesen:**
+
+```python
+gain = 50
+while True:
+    level = measure_mic_db()          # deine Messung
+    buf   = ring_buffer_fill_pct()
+
+    # Ein Batch pro Tick — ein POST statt vieler einzelner.
+    requests.post(f"{HUB}/panels", json=[
+        {"id":"mic", "value":level},   # Zahl → wird an die Plot-History angehängt
+        {"id":"buf", "value":buf},
+    ])
+
+    # Set-Point in eigenem (langsamerem) Takt abholen — ändert sich selten.
+    controls = requests.get(f"{HUB}/control").json()   # z.B. {"gain": 65}
+    if "gain" in controls:
+        gain = controls["gain"]        # neuen Gain anwenden
+
+    time.sleep(0.1)                    # ~10 Hz Dashboard-Rate
+```
+
+Das war's: ein laufendes Dashboard mit Plot, Balken, Status-LED **und** einem Regler,
+über den du die App live steuerst — ganz ohne Library, nur HTTP.
 
 `[BILD: das fertige laufende Dashboard]`
 
@@ -210,7 +334,9 @@ Abgeglichen gegen `PanelHttpEntry` in `src/loghub/panel-types.ts` (Stand 2026-06
 
 ## 10. Screenshots erstellen — GeminiPod als Demo-Objekt
 
-`[AUSFORMULIEREN / DURCHFÜHREN]`
+> Arbeitsnotiz für die Bebilderung (die `[BILD: …]`-Platzhalter oben). Kein Teil der
+> Anleitung selbst — beschreibt nur, **wie** die Screenshots entstehen sollen.
+
 - **Bild-Quelle = GeminiPod-Dashboard** (ESP32 „Sophia"). Zeigt alle Widget-Typen in
   einem realen System: Plots (Mic Peak, Speaker, Heap), Progress (Mic RMS, Spk Ring,
   PSRAM), Gauge (RSSI, Heartbeat), Status-LEDs (Wake Active/Detections/Last), Labels
@@ -226,12 +352,14 @@ Abgeglichen gegen `PanelHttpEntry` in `src/loghub/panel-types.ts` (Stand 2026-06
 
 ---
 
-## TODO (Uwe macht in AiDex fertig)
-- [ ] Texte ausformulieren (`[AUSFORMULIEREN]`-Marker)
-- [ ] curl/HTTP-Beispiele konkretisieren (`[BEISPIEL]`-Marker)
-- [ ] Screenshots einfügen (`[BILD]`-Marker) — Quelle GeminiPod, ERST wenn
-      feature-vollständig (Speaker-Plot + Spk-Ring zeigen dauerhaft Werte)
-- [ ] `slider`/`number` + Control-Rückkanal: prüfen, ob im aktuellen GeminiPod-Build
-      schon genutzt → ggf. in Demo-Bild aufnehmen
-- [ ] Verlinken: in AiDex-`CLAUDE.md` „LogHub Developer Guide" + ggf. Guideline
-- [ ] Feld-Referenztabelle final gegen `panel-types.ts` halten (Single Source of Truth)
+## TODO — noch offen
+
+Text und HTTP-Beispiele sind fertig (gegen den Code abgeglichen, Stand 2026-06-30).
+Offen sind nur noch die Bilder und das Verlinken:
+
+- [ ] Screenshots einfügen (`[BILD: …]`-Platzhalter) — Quelle GeminiPod, ERST wenn
+      feature-vollständig (Speaker-Plot + Spk-Ring zeigen dauerhaft Werte). Anleitung
+      dazu → Sektion 10. Optional: kurzes Demo-GIF (separater Task #24).
+- [ ] `slider`/`number`-Control im Demo-Bild zeigen, sobald der GeminiPod-Build es nutzt.
+- [ ] Verlinken: in AiDex-`README.md` / `CLAUDE.md` („LogHub Developer Guide") auf diese
+      Seite verweisen.
