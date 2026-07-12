@@ -1006,6 +1006,10 @@ function getLanguageFromExtension(filePath: string): string {
         '.php': 'php',
         '.rb': 'ruby',
         '.rake': 'ruby',
+        // Kotlin & Swift are in the highlight.js common bundle (unlike hcl)
+        '.kt': 'kotlin',
+        '.kts': 'kotlin',
+        '.swift': 'swift',
         // HCL/Terraform: highlight.js base bundle has no hcl language module,
         // fall back to plaintext to avoid "Unknown language" errors
         '.tf': 'plaintext',

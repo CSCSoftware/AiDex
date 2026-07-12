@@ -237,6 +237,9 @@ function detectLanguages(queries: ReturnType<typeof createQueries>): string[] {
         '.tf': 'HCL/Terraform',
         '.tfvars': 'HCL/Terraform',
         '.hcl': 'HCL/Terraform',
+        '.kt': 'Kotlin',
+        '.kts': 'Kotlin',
+        '.swift': 'Swift',
     };
 
     const languages = new Set<string>();
