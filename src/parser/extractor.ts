@@ -295,8 +295,10 @@ function extractTypeInfo(node: Parser.SyntaxNode, language: SupportedLanguage): 
         }
     }
 
-    // Find the name child
-    const nameNode = node.children.find(c =>
+    // Prefer the grammar's `name` field when present (robust across grammars,
+    // e.g. Swift where the name is a `type_identifier` under field `name`).
+    // Fall back to scanning children for common identifier node types.
+    const nameNode = node.childForFieldName('name') ?? node.children.find(c =>
         c.type === 'identifier' || c.type === 'type_identifier' || c.type === 'name'
     );
 
@@ -382,6 +384,15 @@ function extractMethodInfo(
     // or reference_declarator (C++). Walk down to find it.
     if ((language === 'c' || language === 'cpp') && node.type === 'function_definition') {
         name = findCFunctionName(node);
+    }
+
+    // Prefer the grammar's `name` field when present. Needed for Swift, where
+    // function names are `simple_identifier` (not matched by the loop below)
+    // and init/deinit names are anonymous `init`/`deinit` tokens exposed only
+    // via the `name` field. Harmless for other grammars (same result).
+    if (!name) {
+        const nameField = node.childForFieldName('name');
+        if (nameField) name = nameField.text;
     }
 
     for (const child of node.children) {

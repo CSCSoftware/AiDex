@@ -16,10 +16,13 @@ import Go from 'tree-sitter-go';
 import Php from 'tree-sitter-php';
 import Ruby from 'tree-sitter-ruby';
 import Hcl from '@tree-sitter-grammars/tree-sitter-hcl';
+import Kotlin from '@tree-sitter-grammars/tree-sitter-kotlin';
+import Swift from 'tree-sitter-swift';
 
 export type SupportedLanguage =
     | 'csharp' | 'typescript' | 'javascript' | 'rust' | 'python'
-    | 'c' | 'cpp' | 'java' | 'go' | 'php' | 'ruby' | 'hcl' | 'astro';
+    | 'c' | 'cpp' | 'java' | 'go' | 'php' | 'ruby' | 'hcl' | 'astro'
+    | 'kotlin' | 'swift';
 
 // Grammar packages export types incompatible with tree-sitter 0.25's Parser.Language interface.
 // All grammars work at runtime via NAPI — this is a type declaration mismatch only.
@@ -39,6 +42,8 @@ const GRAMMAR_MAP: Record<string, Parser.Language> = {
     php: asLang(Php.php),
     ruby: asLang(Ruby),
     hcl: asLang(Hcl),
+    kotlin: asLang(Kotlin),
+    swift: asLang(Swift),
     tsx: asLang(TypeScript.tsx),
     jsx: asLang(TypeScript.tsx), // tsx grammar handles JSX too
     astro: asLang(TypeScript.tsx), // parse extracted frontmatter as TSX
@@ -72,6 +77,9 @@ const EXTENSION_MAP: Record<string, SupportedLanguage> = {
     '.tfvars': 'hcl',
     '.hcl': 'hcl',
     '.astro': 'astro',
+    '.kt': 'kotlin',
+    '.kts': 'kotlin',
+    '.swift': 'swift',
 };
 
 // Cached parsers per language (includes 'tsx' and 'jsx' as virtual keys)

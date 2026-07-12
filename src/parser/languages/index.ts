@@ -14,6 +14,8 @@ import * as go from './go.js';
 import * as php from './php.js';
 import * as ruby from './ruby.js';
 import * as hcl from './hcl.js';
+import * as kotlin from './kotlin.js';
+import * as swift from './swift.js';
 
 export interface LanguageConfig {
     isKeyword: (term: string) => boolean;
@@ -111,6 +113,22 @@ const configs: Record<SupportedLanguage, LanguageConfig> = {
         methodNodes: hcl.HCL_METHOD_NODES,
         typeNodes: hcl.HCL_TYPE_NODES,
         propertyNodes: hcl.HCL_PROPERTY_NODES,
+    },
+    kotlin: {
+        isKeyword: kotlin.isKeyword,
+        identifierNodes: kotlin.KOTLIN_IDENTIFIER_NODES,
+        commentNodes: kotlin.KOTLIN_COMMENT_NODES,
+        methodNodes: kotlin.KOTLIN_METHOD_NODES,
+        typeNodes: kotlin.KOTLIN_TYPE_NODES,
+        propertyNodes: kotlin.KOTLIN_PROPERTY_NODES,
+    },
+    swift: {
+        isKeyword: swift.isKeyword,
+        identifierNodes: swift.SWIFT_IDENTIFIER_NODES,
+        commentNodes: swift.SWIFT_COMMENT_NODES,
+        methodNodes: swift.SWIFT_METHOD_NODES,
+        typeNodes: swift.SWIFT_TYPE_NODES,
+        propertyNodes: swift.SWIFT_PROPERTY_NODES,
     },
     astro: {
         // Astro frontmatter is TypeScript; reuse TypeScript config
