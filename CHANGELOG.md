@@ -2,6 +2,20 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Kotlin and Swift support** — `.kt`, `.kts` and `.swift` files are indexed via tree-sitter and classified as code across every extension list. Brings the language count to **14**. A small share of files using very recent syntax falls back gracefully when the community grammar can't parse them.
+
+### Changed
+
+- **The Viewer's `Debug` tab is now called `Live`** — sitting right next to `Logs`, the old name said nothing about what set the two apart. `Logs` is history that scrolls past; `Live` is the current state, held in fixed slots that overwrite in place. The heading inside the tab reads **Live Dashboard**. Nothing about the API changed: the panel endpoints, widget types and the `debug` tab id are all untouched, so existing senders and deep links keep working.
+
+### Fixed
+
+- **The `▷ Demo` button was missing from an empty dashboard** — the Live tab rendered two different toolbars, and the empty-state one carried only the heading, dropping Demo, Pause and Clear. That hid the button exactly when it was needed: it is the way to get your first widgets, but you only saw it once widgets already existed. Both states now share one toolbar, and the empty-state hint points at the button instead of only naming the POST endpoint.
+
 ## [2.2.2] - 2026-06-30
 
 Community contribution. Adds Astro component support.

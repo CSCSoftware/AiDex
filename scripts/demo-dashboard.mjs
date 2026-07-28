@@ -8,7 +8,7 @@
 //   node scripts/demo-dashboard.mjs              # default port 3335
 //   LOGHUB_PORT=3336 node scripts/demo-dashboard.mjs
 //
-// Open the viewer's Debug tab to watch:  aidex_viewer({ path: "." })
+// Open the viewer's Live tab to watch:  aidex_viewer({ path: "." })
 // (or use scripts/demo-dashboard.ps1 which starts everything for you).
 
 const PORT = process.env.LOGHUB_PORT || '3335';
@@ -142,7 +142,7 @@ function update() {
 
 async function main() {
     console.log(`AiDex Dashboard demo → ${BASE}`);
-    console.log('Open the Viewer Debug tab to watch. Press Ctrl+C to stop.\n');
+    console.log('Open the Viewer Live tab to watch. Press Ctrl+C to stop.\n');
     await defineWidgets();
 
     const timer = setInterval(update, TICK_MS);
@@ -155,8 +155,13 @@ async function main() {
         await clearAll();
         process.exit(0);
     };
+    // SIGHUP/SIGBREAK cover closing the terminal window and Ctrl+Break on Windows.
+    // Best-effort only: a hard kill leaves the widgets behind, which is why the
+    // dashboard also drops them on its own once nothing arrives for a while.
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
+    process.on('SIGHUP', stop);
+    process.on('SIGBREAK', stop);
 }
 
 main();

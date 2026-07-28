@@ -393,7 +393,7 @@ Invoke-RestMethod -Uri "http://localhost:3335/log" -Method POST -ContentType "ap
 
 ## Debug-Dashboard (Panel-API)
 
-Neben dem scrollenden Log-Stream gibt es ein **Live-Dashboard** mit festen Slots: jeder Wert hat eine `id`, ein erneutes Senden derselben `id` **überschreibt den Wert in-place** statt wegzuscrollen. Ideal für hochfrequente / wiederholte Werte (Audio-Pegel, Buffer-Füllung, FPS, Sensoren). Sichtbar im Viewer-**Debug-Tab**.
+Neben dem scrollenden Log-Stream gibt es ein **Live-Dashboard** mit festen Slots: jeder Wert hat eine `id`, ein erneutes Senden derselben `id` **überschreibt den Wert in-place** statt wegzuscrollen. Ideal für hochfrequente / wiederholte Werte (Audio-Pegel, Buffer-Füllung, FPS, Sensoren). Sichtbar im Viewer-**Live-Tab** (hieß bis 2.2.2 „Debug").
 
 ### HTTP API
 
@@ -468,12 +468,12 @@ requests.post("http://localhost:3335/panel", json={
 `scripts/demo-dashboard.mjs` animiert alle Widget-Typen endlos (Audio-Waveform, GPU-Gauges durch ihre Zonen, Signalgenerator sine→sawtooth→triangle→square, Latenz-Spikes). Ideal zum Zeigen/Testen.
 
 ```
-# Voraussetzung: LogHub + Viewer laufen (aidex_log init, aidex_viewer → Debug-Tab)
+# Voraussetzung: LogHub + Viewer laufen (aidex_log init, aidex_viewer → Live-Tab)
 node scripts/demo-dashboard.mjs        # Endlos-Loop, Ctrl+C beendet (clear't beim Exit)
 scripts/demo-dashboard.ps1             # Launcher mit LogHub-Check
 ```
 
-Auch per **▷ Demo**-Button im Debug-Tab (kopiert den Befehl in die Zwischenablage).
+Auch per **▷ Demo**-Button im Live-Tab (kopiert den Befehl in die Zwischenablage). Der Button steht auch im leeren Dashboard bereit — er ist ja der Weg zu den ersten Widgets.
 
 **⚠️ Nie zweimal starten** — zwei Instanzen überschreiben sich gegenseitig (Flackern). Erst alte stoppen. Und: `TaskStop` killt nur den PowerShell-Wrapper, nicht den node-Prozess — bei Background-Start node direkt aufrufen und nach dem Stop verifizieren ([[feedback_taskstop_orphan_node]]).
 

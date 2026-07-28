@@ -2119,6 +2119,34 @@ function getViewerHTML(projectPath: string): string {
             color: var(--accent-cyan); font-size: 0.95em;
         }
 
+        /* Modal — used by the Demo button to explain the clipboard hand-off. */
+        .modal-backdrop {
+            position: fixed; inset: 0; z-index: 1000;
+            background: rgba(0, 0, 0, 0.55);
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .modal {
+            background: var(--bg-secondary); color: var(--text-primary);
+            border: 1px solid var(--border); border-radius: 10px;
+            padding: 22px 24px; max-width: 540px; width: 100%;
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+        }
+        .modal h3 {
+            margin: 0 0 12px; font-size: 1.02em; letter-spacing: 0.03em;
+            color: var(--accent-cyan);
+        }
+        .modal p { margin: 0 0 12px; font-size: 0.9em; line-height: 1.55; color: var(--text-secondary); }
+        .modal-cmd {
+            background: var(--bg-tertiary); border: 1px solid var(--border);
+            border-radius: 6px; padding: 10px 12px; margin: 0 0 12px;
+            font-size: 0.82em; color: var(--accent-cyan);
+            white-space: pre-wrap; word-break: break-all;
+            user-select: all; overflow-x: auto;
+        }
+        .modal-hint { font-size: 0.82em !important; color: var(--text-muted) !important; }
+        .modal-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+
         .debug-group { margin-bottom: 22px; }
         .debug-group-header {
             font-size: 0.8em; font-weight: 700; letter-spacing: 0.14em;
@@ -2267,7 +2295,7 @@ function getViewerHTML(projectPath: string): string {
                 <div class="tab" data-tab="source">Code</div>
                 <div class="tab" data-tab="tasks">Tasks</div>
                 <div class="tab" data-tab="logs">Logs</div>
-                <div class="tab" data-tab="debug">Debug</div>
+                <div class="tab" data-tab="debug">Live</div>
                 <div class="tab" data-tab="search">Search</div>
                 <div class="tab" data-tab="settings">Settings</div>
             </div>
@@ -2467,7 +2495,8 @@ function getViewerHTML(projectPath: string): string {
         let debugPaused = false;
         const plotDirty = new Set();       // ids whose plot canvas needs redraw
         let rafScheduled = false;
-        const STALE_MS = 3000;
+        const STALE_MS = 3000;        // no update for this long → dim the card
+        const ABANDON_MS = 15000;     // …and this long → the sender is gone, drop the widgets
         const PLOT_HISTORY = 200;
 
         // Map an accent name (or hex) to a CSS color. Falls back to cyan.
@@ -2496,7 +2525,10 @@ function getViewerHTML(projectPath: string): string {
 
         function handlePanelSnapshot(widgets) {
             panelWidgets = new Map();
-            (widgets || []).forEach(w => panelWidgets.set(w.id, w));
+            // The snapshot carries no arrival time, so treat "now" as the last
+            // update — otherwise every widget would look abandoned on arrival.
+            const now = Date.now();
+            (widgets || []).forEach(w => { w.lastUpdate = now; panelWidgets.set(w.id, w); });
             if (currentDetailTab === 'debug') renderDebugTab();
         }
         function handlePanelClear(id) {
@@ -2508,6 +2540,7 @@ function getViewerHTML(projectPath: string): string {
         function upsertPanelWidget(w) {
             if (!w || !w.id) return;
             const existed = panelWidgets.has(w.id);
+            w.lastUpdate = Date.now();
             panelWidgets.set(w.id, w);
             if (currentDetailTab !== 'debug' || !debugViewInitialized || debugPaused) return;
 
@@ -2525,15 +2558,28 @@ function getViewerHTML(projectPath: string): string {
 
         function cssId(id) { return id.replace(/[^a-zA-Z0-9_-]/g, '_'); }
 
+        // Toolbar is identical in both states — the Demo button matters most while
+        // the dashboard is still empty, since it is how you get your first widgets.
+        function debugToolbarHTML() {
+            return '<div class="debug-toolbar">' +
+                '<h2>Live Dashboard</h2>' +
+                '<div class="debug-actions">' +
+                '<button class="debug-btn" onclick="copyDemoCommand(this)" title="Copy the demo command to your clipboard, then paste it into a terminal">▷ Demo</button>' +
+                '<button class="debug-btn" onclick="toggleDebugPause(this)">' + (debugPaused ? '▶ Resume' : '⏸ Pause') + '</button>' +
+                '<button class="debug-btn" onclick="clearDebugDashboard()">✕ Clear</button>' +
+                '</div></div>';
+        }
+
         function renderDebugTab() {
             const detail = document.getElementById('detail');
             debugViewInitialized = true;
 
             if (panelWidgets.size === 0) {
                 detail.innerHTML = '<div class="debug-container">' +
-                    '<div class="debug-toolbar"><h2>Debug Dashboard</h2></div>' +
+                    debugToolbarHTML() +
                     '<div class="empty-state"><p>No widgets yet.</p>' +
-                    '<p class="hint">Send <code>POST http://localhost:3335/panel</code> with ' +
+                    '<p class="hint">Hit <strong>▷ Demo</strong> above to copy the showcase command, then paste it into a terminal. ' +
+                    'Or send <code>POST http://localhost:3335/panel</code> with ' +
                     '<code>{ id, type, value, group? }</code> — type ∈ label · progress · gauge · plot · slider · number</p></div></div>';
                 return;
             }
@@ -2551,13 +2597,7 @@ function getViewerHTML(projectPath: string): string {
             });
 
             let html = '<div class="debug-container">';
-            html += '<div class="debug-toolbar">';
-            html += '<h2>Debug Dashboard</h2>';
-            html += '<div class="debug-actions">';
-            html += '<button class="debug-btn" onclick="copyDemoCommand(this)" title="Copy the demo command to your clipboard, then paste it into a terminal">▷ Demo</button>';
-            html += '<button class="debug-btn" onclick="toggleDebugPause(this)">' + (debugPaused ? '▶ Resume' : '⏸ Pause') + '</button>';
-            html += '<button class="debug-btn" onclick="clearDebugDashboard()">✕ Clear</button>';
-            html += '</div></div>';
+            html += debugToolbarHTML();
 
             for (const g of groupNames) {
                 const list = groups.get(g).sort((a, b) => (a.order - b.order) || a.label.localeCompare(b.label));
@@ -2928,6 +2968,16 @@ function getViewerHTML(projectPath: string): string {
             staleTimer = setInterval(() => {
                 if (currentDetailTab !== 'debug') return;
                 const now = Date.now();
+
+                // A sender that goes away without clearing (window closed, crash,
+                // network drop) would otherwise leave its widgets on screen forever.
+                // Dim them first, then drop them once nothing has arrived for a while.
+                if (!debugPaused && panelWidgets.size > 0 && isDashboardAbandoned(now)) {
+                    panelWidgets.clear();
+                    renderDebugTab();
+                    return;
+                }
+
                 for (const w of panelWidgets.values()) {
                     const card = document.getElementById('w-' + cssId(w.id));
                     if (!card) continue;
@@ -2938,6 +2988,19 @@ function getViewerHTML(projectPath: string): string {
                     card.classList.toggle('stale', stale);
                 }
             }, 1000);
+        }
+
+        // True once every live widget has been silent past ABANDON_MS. Sliders and
+        // numbers are set-points, not feeds — they never update on their own, so a
+        // dashboard made only of controls is never considered abandoned.
+        function isDashboardAbandoned(now) {
+            let sawFeed = false;
+            for (const w of panelWidgets.values()) {
+                if (w.type === 'slider' || w.type === 'number') continue;
+                sawFeed = true;
+                if ((now - (w.lastUpdate || 0)) <= ABANDON_MS) return false;
+            }
+            return sawFeed;
         }
 
         function toggleDebugPause(btn) {
@@ -2952,21 +3015,61 @@ function getViewerHTML(projectPath: string): string {
         }
 
         // The browser can't spawn a node process, so the Demo button copies the
-        // command to the clipboard — paste it into a terminal to run the showcase.
+        // command and then says so — a bare "Copied!" left people waiting for
+        // something to happen on its own.
         function copyDemoCommand(btn) {
             const cmd = ${demoCommandJson};
-            const orig = btn.textContent;
-            const done = () => { btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = orig; }, 1800); };
-            const fail = () => { btn.textContent = cmd; setTimeout(() => { btn.textContent = orig; }, 4000); };
             if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(cmd).then(done).catch(fail);
+                navigator.clipboard.writeText(cmd).then(() => showDemoDialog(cmd, true)).catch(() => showDemoDialog(cmd, false));
             } else {
                 // Fallback for non-secure contexts.
                 const ta = document.createElement('textarea');
                 ta.value = cmd; document.body.appendChild(ta); ta.select();
-                try { document.execCommand('copy'); done(); } catch (e) { fail(); }
+                let ok = false;
+                try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
                 document.body.removeChild(ta);
+                showDemoDialog(cmd, ok);
             }
+        }
+
+        // Modal explaining that the command is now on the clipboard and needs to be
+        // pasted into a terminal. If copying failed, the command is shown for manual
+        // selection instead of claiming success.
+        function showDemoDialog(cmd, copied) {
+            closeDemoDialog();
+            const back = document.createElement('div');
+            back.className = 'modal-backdrop';
+            back.id = 'demo-modal';
+            back.onclick = (e) => { if (e.target === back) closeDemoDialog(); };
+
+            const head = copied
+                ? '✓ Command copied to clipboard'
+                : 'Copy this command';
+            const lead = copied
+                ? 'The demo runs as a separate process, which the browser cannot start on its own. Paste the command into a terminal and press Enter:'
+                : 'Copying failed, so select the command below and copy it yourself, then paste it into a terminal:';
+
+            back.innerHTML =
+                '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="demo-modal-title">' +
+                '<h3 id="demo-modal-title">' + head + '</h3>' +
+                '<p>' + lead + '</p>' +
+                '<pre class="modal-cmd">' + escapeHtml(cmd) + '</pre>' +
+                '<p class="modal-hint">The dashboard fills up a second or two later. Press Ctrl+C in the terminal to stop it. Do not start it twice — two instances fight over the same widgets.</p>' +
+                '<div class="modal-actions"><button class="debug-btn" onclick="closeDemoDialog()">Got it</button></div>' +
+                '</div>';
+
+            document.body.appendChild(back);
+            document.addEventListener('keydown', demoDialogEsc);
+            const btn = back.querySelector('.debug-btn');
+            if (btn) btn.focus();
+        }
+
+        function demoDialogEsc(e) { if (e.key === 'Escape') closeDemoDialog(); }
+
+        function closeDemoDialog() {
+            const el = document.getElementById('demo-modal');
+            if (el) el.remove();
+            document.removeEventListener('keydown', demoDialogEsc);
         }
 
         function renderTree(node, container = document.getElementById('tree'), depth = 0) {

@@ -1,6 +1,6 @@
 // Smoke-test the Debug Dashboard panel API.
 // Posts all four widget types to LogHub and animates them so you can watch the
-// dashboard update in-place (open the Viewer's Debug tab first).
+// dashboard update in-place (open the Viewer's Live tab first).
 //
 //   node scripts/test-panel.mjs            # animate ~15s
 //   node scripts/test-panel.mjs 1000 50    # 1000 plot updates/s burst (backpressure test)
@@ -28,7 +28,7 @@ async function defineWidgets() {
 
 async function animate() {
     await defineWidgets();
-    console.log('Widgets defined. Animating ~15s — watch the Debug tab.');
+    console.log('Widgets defined. Animating ~15s — watch the Live tab.');
     const t0 = Date.now();
     let i = 0;
     const timer = setInterval(async () => {

@@ -1,6 +1,6 @@
 # AiDex Debug Dashboard - one-command showcase launcher.
 #
-# Checks that LogHub is reachable, reminds you to open the Debug tab, then runs
+# Checks that LogHub is reachable, reminds you to open the Live tab, then runs
 # the endless demo loop. Press Ctrl+C to stop (the demo clears the dashboard).
 #
 #   .\scripts\demo-dashboard.ps1
@@ -29,7 +29,7 @@ try {
 }
 
 Write-Host ""
-Write-Host "  Open the dashboard:  aidex_viewer({ path: '.' })  ->  Debug tab" -ForegroundColor Gray
+Write-Host "  Open the dashboard:  aidex_viewer({ path: '.' })  -> Live tab" -ForegroundColor Gray
 Write-Host "  Then watch the widgets animate. Press Ctrl+C here to stop." -ForegroundColor Gray
 Write-Host ""
 

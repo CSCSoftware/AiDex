@@ -9,7 +9,7 @@
 //   node scripts/demo-aec-console.mjs            # default port 3335
 //   LOGHUB_PORT=3336 node scripts/demo-aec-console.mjs
 //
-// Open the viewer's Debug tab to watch:  aidex_viewer({ path: "." })
+// Open the viewer's Live tab to watch:  aidex_viewer({ path: "." })
 //
 // The waveforms are SENT AS FULL ARRAY FRAMES (value:[...]) the way the real
 // satellite sends them — 200 int16 samples per frame, the server's PLOT_HISTORY
@@ -170,7 +170,7 @@ async function update() {
 
 async function main() {
     console.log(`AEC Tuning Console demo → ${BASE}`);
-    console.log('Open the Viewer Debug tab to watch. Drag the Tuning sliders — the waveforms react.');
+    console.log('Open the Viewer Live tab to watch. Drag the Tuning sliders — the waveforms react.');
     console.log('Press Ctrl+C to stop.\n');
     await defineWidgets();
 
@@ -181,8 +181,11 @@ async function main() {
         await clearAll();
         process.exit(0);
     };
+    // SIGHUP/SIGBREAK cover closing the terminal window and Ctrl+Break on Windows.
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
+    process.on('SIGHUP', stop);
+    process.on('SIGBREAK', stop);
 
     // Drive frames + poll the knobs on the same loop (poll every ~3rd frame).
     let n = 0;

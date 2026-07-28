@@ -756,7 +756,7 @@ The pattern is universal: anything that can POST and GET — Blender, a CNC cont
 
 ## Debug Dashboard
 
-The scrolling log stream is great for *what happened when* — but useless for fast, repeating values (audio levels, buffer fill, FPS, sensor readings). The **Debug Dashboard** is the opposite: a fixed-slot panel where each value has a permanent spot and **overwrites in place** instead of scrolling away. Live in the Viewer's **Debug tab**, styled like a hardware monitor (MSI Afterburner / HWiNFO).
+The scrolling log stream is great for *what happened when* — but useless for fast, repeating values (audio levels, buffer fill, FPS, sensor readings). The **Debug Dashboard** is the opposite: a fixed-slot panel where each value has a permanent spot and **overwrites in place** instead of scrolling away. Live in the Viewer's **Live tab**, styled like a hardware monitor (MSI Afterburner / HWiNFO).
 
 It rides on the same Log Hub server — no extra setup. Your program sends widget updates via HTTP POST; sending the same `id` again updates that widget.
 
@@ -798,12 +798,12 @@ A ready-to-run showcase animates all widget types (audio waveform, GPU gauges dr
 ```bash
 # 1. Start the Log Hub + Viewer from your AI assistant:
 #      aidex_log({ action: "init" })
-#      aidex_viewer({ path: "." })       → click the Debug tab
+#      aidex_viewer({ path: "." })       → click the Live tab
 # 2. Run the demo (from the AiDex repo root):
 node scripts/demo-dashboard.mjs           # endless loop, Ctrl+C to stop (clears on exit)
 ```
 
-Or use the **▷ Demo** button on the Debug tab — it copies the run command to your clipboard; paste it into a terminal. (The browser can't spawn a process itself.) `scripts/demo-dashboard.ps1` is a one-command launcher that checks the Log Hub first.
+Or use the **▷ Demo** button on the Live tab — it copies the run command to your clipboard; paste it into a terminal. (The browser can't spawn a process itself.) It sits in the toolbar even while the dashboard is still empty, since it's how you get your first widgets. `scripts/demo-dashboard.ps1` is a one-command launcher that checks the Log Hub first.
 
 > Running it twice starts two instances that fight over the same widgets (visible flicker) — stop the old one (Ctrl+C) before starting another.
 
@@ -878,14 +878,14 @@ Opens `http://localhost:3333` with:
 - **Live reload** - Changes detected automatically while you code
 - **Git status icons** - See which files are modified, staged, or untracked
 - **Search tab** - Semantic / exact / hybrid search across code, docs, tasks & notes, with the optional LLM layer (translate + rerank)
-- **Debug tab** - Live Debug Dashboard: fixed-slot widgets (plots, gauges, progress) plus interactive sliders that drive a running program back through the `/control` channel
+- **Live tab** - Live Debug Dashboard: fixed-slot widgets (plots, gauges, progress) plus interactive sliders that drive a running program back through the `/control` channel
 - **Logs tab** - Live log stream from Log Hub with filters (level, source, text search)
 - **Tasks tab** - View and manage your task backlog
 - **Settings tab** - Configure embeddings & the LLM provider (privacy switch defaults to off)
 
 ### Debug Dashboard — live, two-way
 
-The Debug tab is a live dashboard with fixed slots: send the same `id` again and the value updates **in place** instead of scrolling away. Interactive `slider`/`number` widgets flow back to the source (HTTP `/control`, or `aidex_log control_set` so the AI can tune a running program too). Full guide: [docs/loghub-panel-dashboard.md](docs/loghub-panel-dashboard.md).
+The Live tab is a live dashboard with fixed slots: send the same `id` again and the value updates **in place** instead of scrolling away. Interactive `slider`/`number` widgets flow back to the source (HTTP `/control`, or `aidex_log control_set` so the AI can tune a running program too). Full guide: [docs/loghub-panel-dashboard.md](docs/loghub-panel-dashboard.md).
 
 ![AiDex Debug Dashboard - live AEC tuning console](docs/loghub-dashboard.png)
 
