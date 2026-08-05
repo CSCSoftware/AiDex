@@ -892,7 +892,11 @@ Opens `http://localhost:3333` with:
 
 The Live tab is a live dashboard with fixed slots: send the same `id` again and the value updates **in place** instead of scrolling away. Interactive `slider`/`number`/`toggle`/`button` widgets flow back to the source (HTTP `/control`, or `aidex_log control_set` so the AI can tune a running program too). A `button` carries a press **counter**, not a flag, so a source polling at its own pace never misses a click. Full guide: [docs/loghub-panel-dashboard.md](docs/loghub-panel-dashboard.md).
 
-![AiDex Debug Dashboard - live AEC tuning console](docs/loghub-dashboard.png)
+![The Live Dashboard — plots, gauges and the four interactive control types side by side](docs/loghub-dashboard-top.png)
+
+The Controls group holds one of each interactive type: a slider, two toggles, and a button with its press counter beside it. Scrolled further down, several sources share the same dashboard — the hub knows nothing about what any value means, so a synth firmware and a demo script coexist without either being aware of the other:
+
+![Further down the same dashboard — gauges, plots and controls from several sources at once](docs/loghub-dashboard.png)
 
 The sliders react in real time — [watch the GIF](docs/loghub-dashboard.gif):
 

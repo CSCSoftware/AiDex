@@ -45,12 +45,24 @@ einem anderen Prinzip:
   Der Empfänger ist reines HTTP — **kein SDK, keine Bibliothek, kein Build-Schritt.**
   Ein `curl` reicht.
 
-![Das Debug-Dashboard in Betrieb — drei AEC-Waveform-Plots, Gauges und interaktive Tuning-Slider](loghub-dashboard.png)
+![Das Live-Dashboard in Betrieb — Plots, Gauges und die Controls-Gruppe mit allen vier interaktiven Typen](loghub-dashboard-top.png)
+
+In der Gruppe **Controls** steht je ein Vertreter aller interaktiven Typen nebeneinander:
+ein Regler (*Gain*), zwei Schalter (*Mute*, *Freeze Plots*) und ein Taster
+(*Reset Peaks*) mit seinem Druck-Zähler daneben.
+
+Weiter unten auf demselben Dashboard senden **mehrere Quellen gleichzeitig** — eine
+Synth-Firmware und ein Demo-Skript, ohne voneinander zu wissen. Der Hub kennt die
+Bedeutung der Werte nicht, deshalb stört sich nichts daran:
+
+![Weiter unten im selben Dashboard — Gauges, Plots und Controls mehrerer Quellen gleichzeitig](loghub-dashboard.png)
 
 > ▶️ **In Bewegung:** [loghub-dashboard.gif](loghub-dashboard.gif) zeigt das Dashboard live —
 > die Tuning-Slider werden verstellt und die Waveform-Plots reagieren in Echtzeit.
 > (Volles Video: [loghub-dashboard.mp4](loghub-dashboard.mp4).) Das gezeigte Board ist
 > eine AEC-Tuning-Konsole nach dem Vorbild des GeminiPod-Satelliten.
+> ⚠️ GIF und Video zeigen noch den alten Reiternamen „Debug" — die Standbilder oben
+> sind aktuell.
 
 ---
 

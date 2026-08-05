@@ -2,9 +2,9 @@
 
 All notable changes to AiDex will be documented in this file.
 
-## [2.3.0] - 2026-08-05
+## [2.3.0] - 2026-08-06
 
-Two new dashboard controls, Kotlin and Swift, and a file-watcher fix that cuts the Viewer's OS handle usage by an order of magnitude.
+Two new dashboard controls, Kotlin and Swift, and three Viewer fixes — one of which could freeze the whole MCP server.
 
 ### Added
 
@@ -17,6 +17,8 @@ Two new dashboard controls, Kotlin and Swift, and a file-watcher fix that cuts t
 - **The Viewer's `Debug` tab is now called `Live`** — sitting right next to `Logs`, the old name said nothing about what set the two apart. `Logs` is history that scrolls past; `Live` is the current state, held in fixed slots that overwrite in place. The heading inside the tab reads **Live Dashboard**. Nothing about the API changed: the panel endpoints, widget types and the `debug` tab id are all untouched, so existing senders and deep links keep working.
 
 ### Fixed
+
+- **A single indexed file could freeze the entire MCP server** — the per-file stats in `buildTree` used three LEFT JOINs with `COUNT(DISTINCT)` in one `GROUP BY`. The joins multiply *per file* before the DISTINCT collapses them again: occurrences × methods × types. One generated header in an indexed project (191.134 occurrences × 3.138 methods × 786 types) came to **471 billion intermediate rows for that one file**. better-sqlite3 runs synchronously in native code, so the first tree request from a connecting browser killed the process for good: event loop dead, 98 % CPU for hours, 1,5 GB RSS, MCP calls hanging, dashboard empty — while the ports kept listening, which made it look "on but broken". Now three correlated subqueries per file, each walking one table by its `file_id` index, returning the same numbers in milliseconds. Both the `code` and `all` branches carried the pattern.
 
 - **The Viewer's file watcher opened tens of thousands of OS handles** — chokidar removed glob support in v4, but the watcher still passed v3 globs (`'**/node_modules/**'` and friends). In v5 a string matcher is an exact comparison, so the ignore list silently never matched and *every* directory below the project root got watched — one non-recursive `fs.watch`, and therefore one OS handle, each. Measured on this repo (2.520 directories): **19.619 handles and 224 MB RSS, down to 2.375 and 84 MB** after the fix; a control run without the Viewer stayed flat at 191. `ignored` is now a predicate that returns true for the *directory itself* (matching only files inside it still lets chokidar descend), and it reuses the exclusion list the indexer already had — a directory not worth indexing is not worth watching. Fixes the spurious tree rebuilds too: every `node_modules` event used to trigger a full rebuild and broadcast, for data that is not even in the database.
 
