@@ -370,6 +370,12 @@ export const DEFAULT_EXCLUDED_DIRS = new Set([
     // Embedded runtimes & external codec libs
     'Python310', 'Python311', 'Python312', 'Python313',
     'fdk-aac',
+    // ESP-IDF dependency cache — the embedded world's node_modules. Found
+    // 2026-08-05: an ESP32 project carried 12.407 of its 12.713 files in
+    // here, and on Windows chokidar holds one OS handle per WATCHED FILE
+    // (not just per directory) — this single entry took the viewer's
+    // process from ~14.900 handles down to a few hundred.
+    'managed_components',
     // Rust
     '.cargo',
     // .NET
