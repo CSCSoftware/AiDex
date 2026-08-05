@@ -778,17 +778,23 @@ async function buildTree(
     let files: Array<{ path: string; items: number; methods: number; types: number; fileType?: string }>;
 
     if (mode === 'code') {
-        // Only indexed code files (original behavior)
+        // Only indexed code files (original behavior).
+        //
+        // Three correlated subqueries, NOT three LEFT JOINs with
+        // COUNT(DISTINCT). The joins multiply per file (occurrences x methods
+        // x types) before the DISTINCT collapses them again — a giant
+        // generated header (miniaudio.h: 191k occurrences, 3.1k methods,
+        // 786 types) made that 471 BILLION intermediate rows. better-sqlite3
+        // runs synchronously in native code, so the event loop was dead for
+        // hours, the process sat at 98 % CPU, and even the inspector could
+        // not interrupt it (2026-08-05). The subqueries walk each table once
+        // per file via its file_id index and return in milliseconds.
         files = db.prepare(`
             SELECT f.path,
-                   COUNT(DISTINCT o.item_id) as items,
-                   COUNT(DISTINCT m.id) as methods,
-                   COUNT(DISTINCT t.id) as types
+                   (SELECT COUNT(DISTINCT o.item_id) FROM occurrences o WHERE o.file_id = f.id) as items,
+                   (SELECT COUNT(*) FROM methods m WHERE m.file_id = f.id) as methods,
+                   (SELECT COUNT(*) FROM types t WHERE t.file_id = f.id) as types
             FROM files f
-            LEFT JOIN occurrences o ON o.file_id = f.id
-            LEFT JOIN methods m ON m.file_id = f.id
-            LEFT JOIN types t ON t.file_id = f.id
-            GROUP BY f.id
             ORDER BY f.path
         `).all() as Array<{ path: string; items: number; methods: number; types: number }>;
     } else {
@@ -797,18 +803,15 @@ async function buildTree(
             SELECT path, type as fileType FROM project_files WHERE type != 'dir' ORDER BY path
         `).all() as Array<{ path: string; fileType: string }>;
 
-        // Get stats for indexed files — single query with JOINs (no N+1)
+        // Get stats for indexed files. Subqueries, not JOINs — same reasoning
+        // (and the same 471-billion-row incident) as in the 'code' branch above.
         const statsMap = new Map<string, { items: number; methods: number; types: number }>();
         const indexedStats = db.prepare(`
             SELECT f.path,
-                   COUNT(DISTINCT o.item_id) as items,
-                   COUNT(DISTINCT m.id) as methods,
-                   COUNT(DISTINCT t.id) as types
+                   (SELECT COUNT(DISTINCT o.item_id) FROM occurrences o WHERE o.file_id = f.id) as items,
+                   (SELECT COUNT(*) FROM methods m WHERE m.file_id = f.id) as methods,
+                   (SELECT COUNT(*) FROM types t WHERE t.file_id = f.id) as types
             FROM files f
-            LEFT JOIN occurrences o ON o.file_id = f.id
-            LEFT JOIN methods m ON m.file_id = f.id
-            LEFT JOIN types t ON t.file_id = f.id
-            GROUP BY f.id
         `).all() as Array<{ path: string; items: number; methods: number; types: number }>;
 
         for (const stat of indexedStats) {
