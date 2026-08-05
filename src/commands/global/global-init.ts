@@ -354,7 +354,12 @@ export async function globalInit(params: GlobalInitParams): Promise<GlobalInitRe
 // Helpers
 // ============================================================
 
-const DEFAULT_EXCLUDED_DIRS = new Set([
+/**
+ * Directory names never worth descending into. Used by the global scan AND by
+ * the viewer's file watcher (viewer/server.ts) — one list, so a directory that
+ * is not worth indexing is not worth watching either.
+ */
+export const DEFAULT_EXCLUDED_DIRS = new Set([
     'node_modules', '.git', '.svn', '.hg', '__pycache__', '.cache',
     'dist', 'build', 'out', 'target', 'bin', 'obj',
     '.next', '.nuxt', 'vendor', '.gradle', '.idea', '.vscode',

@@ -20,6 +20,7 @@ import { update as updateIndex } from '../commands/update.js';
 import { getGitStatus, GitStatusInfo, GitFileStatus } from './git-status.js';
 import { isSupported as isSupportedByParser } from '../parser/index.js';
 import { PRODUCT_NAME, INDEX_DIR } from '../constants.js';
+import { DEFAULT_EXCLUDED_DIRS } from '../commands/global/global-init.js';
 import Database from 'better-sqlite3';
 
 const PORT = 3333;
@@ -215,16 +216,32 @@ export async function startViewer(projectPath: string, initialTab?: string, opti
         console.error('[Viewer] Broadcast tree update — sent:', sent, 'dropped:', dropped);
     };
 
-    // Use chokidar for reliable cross-platform file watching
+    // Use chokidar for reliable cross-platform file watching.
+    //
+    // `ignored` MUST be a function, not globs. chokidar v4 REMOVED glob support:
+    // a string matcher is now an EXACT comparison (`matcher === string`, see
+    // node_modules/chokidar/index.js), so patterns like '**/node_modules/**'
+    // silently never match. That is not cosmetic — chokidar opens one
+    // non-recursive fs.watch per directory, i.e. one OS handle each. With the
+    // globs dead, watching this very repo (2.520 dirs) drove the process from
+    // 191 to 19.619 handles; the real project content is only ~350 of those
+    // dirs. Measured 2026-08-05, see scripts/measure-viewer-handles.mjs.
+    //
+    // The predicate must return true for the DIRECTORY ITSELF — returning true
+    // only for files inside it still lets chokidar descend and open the handle.
+    const isIgnoredPath = (targetPath: string): boolean => {
+        const rel = path.relative(projectRoot, targetPath);
+        if (!rel || rel.startsWith('..')) return false;   // the root itself
+        // Any excluded name anywhere in the path kills the whole subtree.
+        return rel.split(/[\\/]/).some(
+            (segment) => segment === INDEX_DIR
+                || segment === '.terraform'   // Terraform module + state cache
+                || DEFAULT_EXCLUDED_DIRS.has(segment)
+        );
+    };
+
     fileWatcher = chokidar.watch(projectRoot, {
-        ignored: [
-            '**/node_modules/**',
-            '**/.git/**',
-            `**/${INDEX_DIR}/**`,
-            '**/build/**',
-            '**/dist/**',
-            '**/.terraform/**',  // Terraform downloaded modules + state cache
-        ],
+        ignored: isIgnoredPath,
         ignoreInitial: true,
         persistent: true
     });

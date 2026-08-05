@@ -61,3 +61,6 @@ aidex-init-all.bat
 aidex-scan.bat
 npm-publish.bat
 server.json
+
+# Handle-Messreihen (Task #89) — Rohdaten, lokal
+scripts/measurements/
