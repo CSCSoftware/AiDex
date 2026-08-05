@@ -2,7 +2,9 @@
 
 All notable changes to AiDex will be documented in this file.
 
-## [Unreleased]
+## [2.3.0] - 2026-08-05
+
+Two new dashboard controls, Kotlin and Swift, and a file-watcher fix that cuts the Viewer's OS handle usage by an order of magnitude.
 
 ### Added
 
@@ -15,6 +17,10 @@ All notable changes to AiDex will be documented in this file.
 - **The Viewer's `Debug` tab is now called `Live`** — sitting right next to `Logs`, the old name said nothing about what set the two apart. `Logs` is history that scrolls past; `Live` is the current state, held in fixed slots that overwrite in place. The heading inside the tab reads **Live Dashboard**. Nothing about the API changed: the panel endpoints, widget types and the `debug` tab id are all untouched, so existing senders and deep links keep working.
 
 ### Fixed
+
+- **The Viewer's file watcher opened tens of thousands of OS handles** — chokidar removed glob support in v4, but the watcher still passed v3 globs (`'**/node_modules/**'` and friends). In v5 a string matcher is an exact comparison, so the ignore list silently never matched and *every* directory below the project root got watched — one non-recursive `fs.watch`, and therefore one OS handle, each. Measured on this repo (2.520 directories): **19.619 handles and 224 MB RSS, down to 2.375 and 84 MB** after the fix; a control run without the Viewer stayed flat at 191. `ignored` is now a predicate that returns true for the *directory itself* (matching only files inside it still lets chokidar descend), and it reuses the exclusion list the indexer already had — a directory not worth indexing is not worth watching. Fixes the spurious tree rebuilds too: every `node_modules` event used to trigger a full rebuild and broadcast, for data that is not even in the database.
+
+- **`managed_components` is now excluded as well** — the predicate fix above was necessary but not sufficient on ESP-IDF projects, where that directory is the embedded world's `node_modules`. The arithmetic on one such repo is the real finding: 14.858 handles = 1.865 watched directories + 12.713 watched *files* + base. On Windows chokidar holds a handle per watched **file**, not merely per directory, and 12.407 of those files sat in `managed_components`. This one entry brings the process back to a few hundred handles. It disappears from global-init scanning too, for the same reason as `node_modules`.
 
 - **The `▷ Demo` button was missing from an empty dashboard** — the Live tab rendered two different toolbars, and the empty-state one carried only the heading, dropping Demo, Pause and Clear. That hid the button exactly when it was needed: it is the way to get your first widgets, but you only saw it once widgets already existed. Both states now share one toolbar, and the empty-state hint points at the button instead of only naming the POST endpoint.
 

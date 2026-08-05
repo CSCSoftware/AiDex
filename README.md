@@ -50,7 +50,7 @@ AiDex is an MCP server that gives AI coding assistants a memory, semantic search
 | **Screenshots** | `screenshot`, `windows` | Cross-platform screen capture with LLM optimization — scale + color reduction saves up to 95% tokens |
 | **Viewer** | `viewer` | Interactive browser UI with file tree, signatures, tasks, logs, search, and live reload |
 
-**12 languages** — C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby, HCL/Terraform — plus Astro frontmatter
+**14 languages** — C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby, HCL/Terraform, Kotlin, Swift — plus Astro frontmatter
 
 <details>
 <summary><strong>Quick Examples</strong> — see it in action</summary>
@@ -244,6 +244,8 @@ The index lives in `.aidex/index.db` (SQLite) - fast, portable, no external depe
 | PHP | `.php` |
 | Ruby | `.rb`, `.rake` |
 | HCL/Terraform | `.tf`, `.tfvars`, `.hcl` |
+| Kotlin | `.kt`, `.kts` |
+| Swift | `.swift` |
 | Astro | `.astro` (TypeScript frontmatter) |
 
 ## Quick Start
@@ -391,7 +393,7 @@ Do I want to search code?
 | Screenshots | `aidex_screenshot`, `aidex_windows` | Screen capture with LLM optimization (scale + color reduction, no index needed) |
 | Viewer | `aidex_viewer` | Interactive browser UI with file tree, signatures, tasks, and live logs |
 
-**12 languages:** C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby, HCL/Terraform — plus Astro frontmatter
+**14 languages:** C#, TypeScript, JavaScript, Rust, Python, C, C++, Java, Go, PHP, Ruby, HCL/Terraform, Kotlin, Swift — plus Astro frontmatter
 
 ### Session Notes
 
@@ -736,10 +738,13 @@ AI ──control_set {id,cmd}──→  Hub  ←──GET /control──  Your A
 AI ←──control_get──── result ─ Hub  ←──POST /control── runs it, posts result + ack
 ```
 
-- **`control_set { id, value }`** — the AI (or a Viewer slider) sets a control slot.
+- **`control_set { id, value }`** — the AI (or a Viewer slider/switch) sets a control slot.
 - **`GET /control`** — your app reads all current control values.
 - **`POST /control`** — your app writes back results / acknowledgements.
+- **`POST /control/press { id }`** — registers one press of a `button` control. The hub owns the counter, so presses from several open dashboards add up instead of overwriting each other.
 - **`control_get`** — the AI reads what the app reported.
+
+> A `button` value is a **press counter**, not a flag — your app polls at its own pace, so compare against the last count you saw rather than testing for "pressed". Any backwards jump means the hub restarted or the panel was cleared: adopt the value, don't read it as a million presses.
 
 Two slots by convention give you full request/response: a `*_cmd` slot the AI writes, a `*_result` slot the app writes, and an `*_ack` counter so each command runs **exactly once** (bump the command `id` every time; the app skips any `id` it has already handled).
 

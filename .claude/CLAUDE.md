@@ -2,7 +2,7 @@
 
 MCP Server für persistentes Code-Indexing. Ermöglicht Claude Code schnelle, präzise Suchen statt Grep/Glob.
 
-**Version:** 2.2.0 | **Sprachen:** 12 | **Repo:** https://github.com/CSCSoftware/AiDex
+**Version:** 2.3.0 | **Sprachen:** 14 | **Repo:** https://github.com/CSCSoftware/AiDex
 
 ## Build & Run
 
@@ -106,7 +106,7 @@ Actions: `init` (Server starten) → `query` (Logs abfragen) → `free` (Server 
 
 ## Sprachen
 
-C# · TypeScript · JavaScript · Rust · Python · C · C++ · Java · Go · PHP · Ruby · HCL/Terraform
+C# · TypeScript · JavaScript · Rust · Python · C · C++ · Java · Go · PHP · Ruby · HCL/Terraform · Kotlin · Swift
 
 ## Architektur
 
@@ -142,7 +142,7 @@ src/
 └── parser/
     ├── tree-sitter.ts    # Parser (1MB Buffer)
     ├── extractor.ts      # Identifier + Signaturen
-    └── languages/        # Keyword-Filter (12 Sprachen)
+    └── languages/        # Keyword-Filter (14 Sprachen)
 ```
 
 ## Datenbank-Tabellen
