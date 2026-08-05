@@ -402,11 +402,13 @@ Neben dem scrollenden Log-Stream gibt es ein **Live-Dashboard** mit festen Slots
 | `/panel` | POST | `{ id, type, value, group?, ... }` | Einzelnes Widget setzen/aktualisieren |
 | `/panels` | POST | `[{ ... }, ...]` | Batch |
 | `/panel/clear` | POST | `{ id? }` | Ein Widget (id) oder alle (leer) entfernen |
+| `/control` | POST/GET | `{ id, value }` / — | Control-Wert setzen; GET liefert alle als `{ id: value }` (das pollt die Quelle) |
+| `/control/press` | POST | `{ id }` | Einen Tastendruck melden — der **Hub** zählt hoch, nicht der Aufrufer |
 
 ### Widget-Felder
 
 - `id` (Pflicht) — fester Slot-Key; gleiche id = Überschreiben
-- `type` (Pflicht bei Erst-Anlage) — `label` · `progress` · `gauge` · `plot`
+- `type` (Pflicht bei Erst-Anlage) — `label` · `progress` · `gauge` · `plot` · `slider` · `number` · `toggle` · `button`
 - `value` — typabhängig: Zahl, String (für gauge-Status `"ok"`/`"warn"`/`"error"`), oder Zahl-Array (plot: ganzer Frame)
 - `group` — Sektion im Dashboard (default `"Default"`)
 - `label` — Anzeigename (default = id)
@@ -422,6 +424,16 @@ Neben dem scrollenden Log-Stream gibt es ein **Live-Dashboard** mit festen Slots
 - **progress** — Balken (min..max), mit Schwellwert-Färbung (warn/crit)
 - **gauge** — bei Zahl: radiales Tacho (Afterburner-Stil) mit Zonen-Färbung; bei Status-String: pulsierende LED (grün/gelb/rot)
 - **plot** — Echtzeit-Liniengraph (HWiNFO-Stil) mit Gitternetz + min/max/avg. Einzel-Sample (`value: 0.7`) wird an einen Verlauf (200 Werte) angehängt; ein Array ersetzt den ganzen Verlauf.
+
+**Interaktiv** (Wert fließt zurück zur Quelle, die ihn per `GET /control` abholt):
+- **slider** / **number** — Regler bzw. Zahleneingabe. Felder `min`/`max`/`step`/`value`.
+- **toggle** — Schalter, Wert `0`/`1`. `unit` als `"AN|AUS"` beschriftet beide Stellungen.
+- **button** — Taster. ⚠️ Der Wert ist ein **monoton steigender Zähler**, kein Flag: die
+  Quelle pollt in ihrem eigenen Takt, ein Ja/Nein wäre zwischen zwei Polls verloren.
+  Die Quelle vergleicht mit dem zuletzt gesehenen Stand → Differenz = Anzahl Drücke.
+  Jeder Sprung **nach unten** (Überlauf bei 1e6, `/panel/clear`, Hub-Neustart) heißt
+  „Neustart, Wert übernehmen" — nicht eine Million Drücke. `value` beim Anlegen wird
+  ignoriert, Start immer 0.
 
 ### Lifecycle
 

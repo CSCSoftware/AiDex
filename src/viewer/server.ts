@@ -2284,6 +2284,55 @@ function getViewerHTML(projectPath: string): string {
         .widget-number-mini { width: 5.5em; flex: 0 0 auto; text-align: right; }
         .widget-number:focus { outline: none; border-color: var(--w-accent, var(--accent-cyan)); }
 
+        /* Toggle (state) — a two-position switch, styled as a sliding knob. */
+        .widget-toggle {
+            position: relative; width: 52px; height: 26px; flex: 0 0 auto;
+            border-radius: 13px; border: 1px solid var(--border);
+            background: var(--bg-primary); cursor: pointer; padding: 0;
+            transition: background 0.18s ease, border-color 0.18s ease;
+        }
+        .widget-toggle::after {
+            content: ""; position: absolute; top: 2px; left: 2px;
+            width: 20px; height: 20px; border-radius: 50%;
+            background: var(--text-secondary); transition: transform 0.18s ease, background 0.18s ease;
+        }
+        .widget-toggle[aria-pressed="true"] {
+            background: color-mix(in srgb, var(--w-accent, var(--accent-cyan)) 28%, transparent);
+            border-color: var(--w-accent, var(--accent-cyan));
+        }
+        .widget-toggle[aria-pressed="true"]::after {
+            transform: translateX(26px);
+            background: var(--w-accent, var(--accent-cyan));
+            box-shadow: 0 0 8px var(--w-accent, var(--accent-cyan));
+        }
+        .widget-toggle:focus-visible { outline: 2px solid var(--w-accent, var(--accent-cyan)); outline-offset: 2px; }
+        .widget-toggle-state {
+            font-family: ui-monospace, monospace; font-size: 0.95em;
+            color: var(--text-secondary); letter-spacing: 0.04em;
+        }
+
+        /* Button (event) — momentary push, with a press counter next to it. */
+        .widget-button {
+            flex: 1; min-width: 0; padding: 8px 14px; cursor: pointer;
+            font-family: inherit; font-size: 0.95em; font-weight: 600;
+            color: var(--w-accent, var(--accent-cyan));
+            background: color-mix(in srgb, var(--w-accent, var(--accent-cyan)) 12%, transparent);
+            border: 1px solid var(--w-accent, var(--accent-cyan)); border-radius: 6px;
+            transition: transform 0.06s ease, background 0.15s ease, box-shadow 0.15s ease;
+        }
+        .widget-button:hover { background: color-mix(in srgb, var(--w-accent, var(--accent-cyan)) 22%, transparent); }
+        .widget-button:active { transform: translateY(1px) scale(0.985); }
+        .widget-button:focus-visible { outline: 2px solid var(--w-accent, var(--accent-cyan)); outline-offset: 2px; }
+        /* Brief flash confirming the hub counted the press. */
+        .widget-button.pressed {
+            background: var(--w-accent, var(--accent-cyan)); color: var(--bg-primary);
+            box-shadow: 0 0 14px var(--w-accent, var(--accent-cyan));
+        }
+        .widget-button-count {
+            font-family: ui-monospace, monospace; font-size: 0.9em;
+            color: var(--text-secondary); flex: 0 0 auto; min-width: 3.5em; text-align: right;
+        }
+
         @keyframes widget-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
         @keyframes value-flash { 0% { color: #fff; text-shadow: 0 0 16px #fff; } 100% {} }
         @keyframes led-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.65; } }
@@ -2597,7 +2646,7 @@ function getViewerHTML(projectPath: string): string {
                     '<div class="empty-state"><p>No widgets yet.</p>' +
                     '<p class="hint">Hit <strong>▷ Demo</strong> above to copy the showcase command, then paste it into a terminal. ' +
                     'Or send <code>POST http://localhost:3335/panel</code> with ' +
-                    '<code>{ id, type, value, group? }</code> — type ∈ label · progress · gauge · plot · slider · number</p></div></div>';
+                    '<code>{ id, type, value, group? }</code> — type ∈ label · progress · gauge · plot · slider · number · toggle · button</p></div></div>';
                 return;
             }
 
@@ -2651,7 +2700,7 @@ function getViewerHTML(projectPath: string): string {
             } else if (w.type === 'plot') {
                 body = '<canvas class="widget-plot-canvas" id="plot-' + cid + '" width="320" height="90"></canvas>' +
                     '<div class="widget-plot-stats" id="pstat-' + cid + '"></div>';
-            } else if (w.type === 'slider' || w.type === 'number') {
+            } else if (isControlWidget(w.type)) {
                 body = renderControlBody(w);
             }
             return '<div class="widget-card" id="w-' + cid + '" style="--w-accent:' + color + '">' +
@@ -2706,6 +2755,34 @@ function getViewerHTML(projectPath: string): string {
             // function argument — an id with quotes would otherwise break out of
             // the oninput="" attribute. Handlers read it back from the element.
             const idAttr = 'data-cid="' + escapeHtml(w.id) + '"';
+            if (w.type === 'toggle') {
+                // State control: 0 or 1. Any non-zero counts as on, so a source
+                // that seeds it with something else still renders sensibly.
+                const on = typeof w.value === 'number' ? w.value !== 0 : false;
+                // Optional per-position captions: unit "on|off" overrides the default.
+                const caps = (w.unit || '').split('|');
+                const onText = caps[0] ? caps[0] : 'ON';
+                const offText = caps.length > 1 && caps[1] ? caps[1] : 'OFF';
+                return '<div class="widget-control-row">' +
+                    '<button class="widget-toggle" id="ctl-' + cid + '" ' + idAttr + ' ' +
+                    'type="button" aria-pressed="' + (on ? 'true' : 'false') + '" ' +
+                    'data-on="' + escapeHtml(onText) + '" data-off="' + escapeHtml(offText) + '" ' +
+                    'onclick="onControlToggle(this)"></button>' +
+                    '<span class="widget-toggle-state" id="ctlstate-' + cid + '">' +
+                    escapeHtml(on ? onText : offText) + '</span>' +
+                    '</div>';
+            }
+            if (w.type === 'button') {
+                // Event control: the value is a press COUNTER, shown next to the
+                // button so it is visible that the hub counted the press.
+                const count = typeof w.value === 'number' ? w.value : 0;
+                const caption = w.label ? w.label : w.id;
+                return '<div class="widget-control-row">' +
+                    '<button class="widget-button" id="ctl-' + cid + '" ' + idAttr + ' ' +
+                    'type="button" onclick="onControlPress(this)">' + escapeHtml(caption) + '</button>' +
+                    '<span class="widget-button-count" id="ctlcount-' + cid + '">' + count + '</span>' +
+                    '</div>';
+            }
             if (w.type === 'number') {
                 // Spinner: number input only.
                 return '<div class="widget-control-row">' +
@@ -2724,6 +2801,14 @@ function getViewerHTML(projectPath: string): string {
                 'min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" ' +
                 'oninput="onControlInput(this)">' + unit +
                 '</div>';
+        }
+
+        // Is this widget interactive (user-editable) rather than a read-only feed?
+        // Mirrors CONTROL_TYPES in panel-types.ts. One test instead of the same
+        // type list repeated at every branch — the next control type only has to
+        // be added here and in renderControlBody.
+        function isControlWidget(type) {
+            return type === 'slider' || type === 'number' || type === 'toggle' || type === 'button';
         }
 
         // While true, holds the id of the control the user is dragging — the
@@ -2751,6 +2836,38 @@ function getViewerHTML(projectPath: string): string {
             const sl = document.getElementById('ctl-' + cssId(id));
             if (sl && sl.type === 'range') sl.value = el.value;
             queueControlPost(id, el.value);
+        }
+
+        function onControlToggle(el) {
+            // Flip locally for an instant response, then post. The broadcast echo
+            // confirms it; if the post fails the next echo puts it back.
+            const id = el.dataset.cid;
+            const next = el.getAttribute('aria-pressed') === 'true' ? 0 : 1;
+            applyToggleVisual(el, next);
+            queueControlPost(id, next);
+        }
+
+        function applyToggleVisual(el, value) {
+            const on = value !== 0;
+            el.setAttribute('aria-pressed', on ? 'true' : 'false');
+            const stateEl = document.getElementById('ctlstate-' + cssId(el.dataset.cid));
+            if (stateEl) stateEl.textContent = on ? el.dataset.on : el.dataset.off;
+        }
+
+        function onControlPress(el) {
+            // A press is an EVENT, so it does NOT go through queueControlPost —
+            // that coalescer drops all but the last value in its window, which
+            // would silently swallow rapid presses. Each click posts once, and
+            // the HUB owns the counter (two open dashboards must both count).
+            const id = el.dataset.cid;
+            el.classList.add('pressed');
+            setTimeout(() => el.classList.remove('pressed'), 140);
+            // Hub port hard-coded like postControl above (same machine).
+            fetch('http://localhost:3335/control/press', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id }),
+            }).catch(() => { /* hub gone — the echo simply never arrives */ });
         }
 
         function queueControlPost(id, raw) {
@@ -2804,7 +2921,15 @@ function getViewerHTML(projectPath: string): string {
                 } else {
                     drawGauge(w);
                 }
-            } else if (w.type === 'slider' || w.type === 'number') {
+            } else if (w.type === 'toggle') {
+                // Echo: another dashboard flipped it, or the source overrode it.
+                const el = document.getElementById('ctl-' + cssId(w.id));
+                if (el && typeof w.value === 'number') applyToggleVisual(el, w.value);
+            } else if (w.type === 'button') {
+                // Echo carries the authoritative press count from the hub.
+                const countEl = document.getElementById('ctlcount-' + cssId(w.id));
+                if (countEl && typeof w.value === 'number') countEl.textContent = w.value;
+            } else if (isControlWidget(w.type)) {
                 // Echo from the server (another viewer changed it, or the source
                 // clamped/overrode it). Sync the inputs — but never while THIS user
                 // is dragging this control, or the thumb would fight their hand.
@@ -3000,20 +3125,20 @@ function getViewerHTML(projectPath: string): string {
                     if (!card) continue;
                     // Interactive controls hold a static set-point — they never go
                     // stale (they'd dim a second after load with nothing wrong).
-                    if (w.type === 'slider' || w.type === 'number') { card.classList.remove('stale'); continue; }
+                    if (isControlWidget(w.type)) { card.classList.remove('stale'); continue; }
                     const stale = (now - (w.lastUpdate || 0)) > STALE_MS;
                     card.classList.toggle('stale', stale);
                 }
             }, 1000);
         }
 
-        // True once every live widget has been silent past ABANDON_MS. Sliders and
-        // numbers are set-points, not feeds — they never update on their own, so a
+        // True once every live widget has been silent past ABANDON_MS. Controls
+        // are set-points, not feeds — they never update on their own, so a
         // dashboard made only of controls is never considered abandoned.
         function isDashboardAbandoned(now) {
             let sawFeed = false;
             for (const w of panelWidgets.values()) {
-                if (w.type === 'slider' || w.type === 'number') continue;
+                if (isControlWidget(w.type)) continue;
                 sawFeed = true;
                 if ((now - (w.lastUpdate || 0)) <= ABANDON_MS) return false;
             }

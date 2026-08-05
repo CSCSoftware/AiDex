@@ -6,6 +6,8 @@ All notable changes to AiDex will be documented in this file.
 
 ### Added
 
+- **Dashboard switches and buttons** — the Live tab could only ever set a *value* (`slider`, `number`). Two control types join them: **`toggle`** for state (a two-position switch, value `0`/`1`, with `unit` doubling as the `"ON|OFF"` captions) and **`button`** for events. A button's value is a monotonically rising **press counter**, not a flag, because a source polls `GET /control` at its own pace — with a boolean, every press landing between two polls would be lost. The source compares against the last count it saw and learns both *that* and *how often* it was pressed; a backwards jump (wrap at 1e6, `/panel/clear`, hub restart) means "restart, adopt the value". Presses arrive via the new **`POST /control/press`**, which takes only an `id`: the hub owns the counter, so two open dashboards both count instead of overwriting each other. Re-announcing a widget (a device rebooting) no longer clobbers a value the user dialed in, and the press count survives it.
+
 - **Kotlin and Swift support** — `.kt`, `.kts` and `.swift` files are indexed via tree-sitter and classified as code across every extension list. Brings the language count to **14**. A small share of files using very recent syntax falls back gracefully when the community grammar can't parse them.
 
 ### Changed

@@ -781,7 +781,7 @@ curl -X POST http://localhost:3335/panel -H "Content-Type: application/json" \
   -d '{"id":"gpu_temp","type":"gauge","value":67,"min":0,"max":100,"warn":75,"crit":90,"group":"Hardware"}'
 ```
 
-**Fields:** `id` (required), `type` (`label`/`progress`/`gauge`/`plot`, required on first send), `value` (number, status string, or number array for a full plot frame), `group`, `label`, `unit`, `min`, `max`, `warn`, `crit`, `color`, `order`.
+**Fields:** `id` (required), `type` (`label`/`progress`/`gauge`/`plot`/`slider`/`number`/`toggle`/`button`, required on first send), `value` (number, status string, or number array for a full plot frame), `group`, `label`, `unit`, `min`, `max`, `warn`, `crit`, `color`, `order`.
 **Endpoints:** `POST /panel` (one), `POST /panels` (batch), `POST /panel/clear` (`{id}` for one, empty for all).
 
 ### Lifecycle
@@ -878,14 +878,14 @@ Opens `http://localhost:3333` with:
 - **Live reload** - Changes detected automatically while you code
 - **Git status icons** - See which files are modified, staged, or untracked
 - **Search tab** - Semantic / exact / hybrid search across code, docs, tasks & notes, with the optional LLM layer (translate + rerank)
-- **Live tab** - Live Debug Dashboard: fixed-slot widgets (plots, gauges, progress) plus interactive sliders that drive a running program back through the `/control` channel
+- **Live tab** - Live Debug Dashboard: fixed-slot widgets (plots, gauges, progress) plus interactive sliders, switches and buttons that drive a running program back through the `/control` channel
 - **Logs tab** - Live log stream from Log Hub with filters (level, source, text search)
 - **Tasks tab** - View and manage your task backlog
 - **Settings tab** - Configure embeddings & the LLM provider (privacy switch defaults to off)
 
 ### Debug Dashboard — live, two-way
 
-The Live tab is a live dashboard with fixed slots: send the same `id` again and the value updates **in place** instead of scrolling away. Interactive `slider`/`number` widgets flow back to the source (HTTP `/control`, or `aidex_log control_set` so the AI can tune a running program too). Full guide: [docs/loghub-panel-dashboard.md](docs/loghub-panel-dashboard.md).
+The Live tab is a live dashboard with fixed slots: send the same `id` again and the value updates **in place** instead of scrolling away. Interactive `slider`/`number`/`toggle`/`button` widgets flow back to the source (HTTP `/control`, or `aidex_log control_set` so the AI can tune a running program too). A `button` carries a press **counter**, not a flag, so a source polling at its own pace never misses a click. Full guide: [docs/loghub-panel-dashboard.md](docs/loghub-panel-dashboard.md).
 
 ![AiDex Debug Dashboard - live AEC tuning console](docs/loghub-dashboard.png)
 

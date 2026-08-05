@@ -32,10 +32,12 @@ einem anderen Prinzip:
 - **Gedacht für laufende Messwerte:** Audio-Pegel, Puffer-Füllstand, FPS, freier Heap,
   WLAN-RSSI, Temperatur, Status-LEDs — alles, was du normalerweise nur mühsam aus
   Log-Zeilen herauslesen würdest.
-- **Zwei Richtungen.** Die meisten Widgets sind **Anzeige** (Quelle → AiDex). Zwei
-  Typen — `slider` und `number` — sind **interaktiv**: AiDex rendert ein Eingabefeld,
-  der User dreht daran, und der neue Wert fließt **zurück an die Quelle** (→ Sektion 3b).
-  Damit steuert man eine laufende App live vom Browser aus.
+- **Zwei Richtungen.** Die meisten Widgets sind **Anzeige** (Quelle → AiDex). Vier
+  Typen — `slider`, `number`, `toggle` und `button` — sind **interaktiv**: AiDex rendert
+  ein Bedienelement, der User betätigt es, und der neue Wert fließt **zurück an die
+  Quelle** (→ Sektion 3b). Damit steuert man eine laufende App live vom Browser aus:
+  Werte einstellen (Regler, Zahl), etwas an-/ausschalten (Schalter), etwas auslösen
+  (Taster).
 - **Durchgängiges Prinzip: der Sender entscheidet, AiDex rendert nur.** Skala, Farbe,
   Einheit, Nachkommastellen — all das bestimmt die Quelle. Der Viewer hat keine eigene
   Logik, er zeigt an, was ankommt.
@@ -116,17 +118,34 @@ Verbindungen — jeder POST steht für sich.
 
 ### 3b. Control-Rückkanal (interaktive Widgets)
 
-Die Widget-Typen `slider` und `number` sind **interaktiv**: AiDex rendert ein
-Eingabefeld, und wenn der User es verstellt, fließt der neue Wert **zurück an die
-Quelle**. Das ist der einzige Weg, auf dem Daten von AiDex zurück zur App laufen —
-ansonsten ist alles Einbahnstraße (Quelle → AiDex). Der Mechanismus ist bewusst dumm
-und quell-agnostisch: ein flacher `{ id: value }`-Speicher, der nichts über die
-Bedeutung der Werte weiß.
+Die Widget-Typen `slider`, `number`, `toggle` und `button` sind **interaktiv**: AiDex
+rendert ein Bedienelement, und wenn der User es betätigt, fließt der neue Wert
+**zurück an die Quelle**. Das ist der einzige Weg, auf dem Daten von AiDex zurück zur
+App laufen — ansonsten ist alles Einbahnstraße (Quelle → AiDex). Der Mechanismus ist
+bewusst dumm und quell-agnostisch: ein flacher `{ id: value }`-Speicher, der nichts
+über die Bedeutung der Werte weiß.
+
+**Zustand vs. Ereignis — der wichtige Unterschied:**
+
+- `slider`, `number`, `toggle` sind **Zustand**. Der Wert steht einfach da; wer ihn
+  später liest, bekommt trotzdem die richtige Antwort.
+- `button` ist ein **Ereignis**. Ereignisse gehen bei einem Poll-Modell verloren:
+  drückt der User zwischen zwei Abfragen der Quelle, wäre ein einfaches Ja/Nein-Flag
+  längst wieder zurückgesetzt. Deshalb ist der Wert eines `button` ein **monoton
+  steigender Zähler**. Die Quelle merkt sich den zuletzt gesehenen Stand und liest an
+  der Differenz ab, **dass** und **wie oft** gedrückt wurde — auch bei fünf Klicks
+  zwischen zwei Polls.
 
 | Methode & Pfad | Zweck |
 |---|---|
-| `POST /control` | Setzt einen Control-Wert. Body `{ id, value }`. Schreibt in den Control-Store **und** spiegelt den Wert auf die Kachel (alle offenen Viewer sehen die Änderung). Das ruft der **Viewer** auf, wenn der User am Regler zieht. |
+| `POST /control` | Setzt einen Control-Wert. Body `{ id, value }`. Schreibt in den Control-Store **und** spiegelt den Wert auf die Kachel (alle offenen Viewer sehen die Änderung). Das ruft der **Viewer** auf, wenn der User am Regler zieht oder einen Schalter umlegt. |
+| `POST /control/press` | Meldet **einen Tastendruck**. Body `{ id }` — ohne Wert. Der **Hub** zählt hoch, nicht der Aufrufer: bei zwei offenen Dashboards würden beide denselben Folgewert schicken und ein Druck ginge verloren. Antwort enthält den neuen Zählerstand. |
 | `GET /control`  | Liefert den ganzen Store als flaches `{ id: value }`-Objekt. **Das pollt die Quelle**, um die aktuellen Set-Points zu erfahren. |
+
+**Zähler richtig auswerten:** Ein `button`-Wert läuft bei 1.000.000 auf 1 über, und
+`POST /panel/clear` setzt ihn auf 0 zurück. Die Quelle muss deshalb jeden Sprung
+**nach unten** als „Neustart, Wert übernehmen" behandeln — nicht als knapp eine
+Million Tastendrücke. Vorwärtssprünge sind echte Drücke.
 
 - **Fluss in vier Schritten:** (1) Quelle definiert ein `slider`-Widget mit Startwert →
   (2) User schiebt den Regler im Viewer → (3) der Viewer schickt `POST /control` →
@@ -177,6 +196,12 @@ danach reicht `id` + `value`.
 **Interaktiv (User im Viewer → zurück an die Quelle, via Control-Store — NEU):**
 - **`slider`** — Schieberegler. Felder: `min`/`max`/`step`/`value`/`label`/`group`/`order`.
 - **`number`** — Zahlen-Eingabe. Gleiche Felder. Beide schreiben per `POST /control` zurück.
+- **`toggle`** — Schalter (Zustand), Wert `0` oder `1`. Optionale Beschriftung beider
+  Stellungen über `unit` im Format `"AN|AUS"` (default `ON`/`OFF`). Schreibt per
+  `POST /control` zurück.
+- **`button`** — Taster (Ereignis). Der Wert ist ein **Druck-Zähler**, kein Flag —
+  siehe Abschnitt 3b. `value` beim Anlegen wird ignoriert, der Zähler startet
+  immer bei `0`. Beschriftung kommt aus `label`. Schreibt per `POST /control/press`.
 
 `[BILD: je ein Beispiel pro Typ nebeneinander — inkl. slider/number]`
 
@@ -192,11 +217,11 @@ sagt, wo es wirkt; bei anderen Typen wird es ignoriert. Abgeglichen gegen
 | Feld | Typ | Gilt für | Bedeutung |
 |---|---|---|---|
 | `id`      | string         | **alle (Pflicht)** | Eindeutiger Schlüssel. Gleiche id = Update in place. |
-| `type`    | string         | **erstellen (Pflicht)** | `label`/`progress`/`gauge`/`plot`/`slider`/`number`. Nur beim Anlegen nötig. |
-| `value`   | number\|string\|number[] | alle | Aktueller Wert. Bei `plot`: Zahl = anhängen, Array = ganzer Frame. |
+| `type`    | string         | **erstellen (Pflicht)** | `label`/`progress`/`gauge`/`plot`/`slider`/`number`/`toggle`/`button`. Nur beim Anlegen nötig. |
+| `value`   | number\|string\|number[] | alle | Aktueller Wert. Bei `plot`: Zahl = anhängen, Array = ganzer Frame. Bei `toggle`: `0`/`1`. Bei `button` **ignoriert** — der Zähler startet immer bei 0. |
 | `group`   | string         | alle | Gruppen-Box. Viewer sortiert Gruppen **alphabetisch** → Zahlen-Präfix (`"1 Boot"`, `"2 Audio"`) erzwingt Reihenfolge. |
 | `label`   | string         | alle | Anzeigename der Kachel. |
-| `unit`    | string         | alle | Einheit (z.B. `dB`, `%`, `ms`). |
+| `unit`    | string         | alle | Einheit (z.B. `dB`, `%`, `ms`). Bei `toggle`: Beschriftung beider Stellungen als `"AN|AUS"`. |
 | `min`     | number         | progress/gauge/plot/slider/number | Skala/Range-Untergrenze. |
 | `max`     | number         | progress/gauge/plot/slider/number | Skala/Range-Obergrenze. |
 | `step`    | number         | **slider/number** | Schrittweite pro Tick (default 1). |

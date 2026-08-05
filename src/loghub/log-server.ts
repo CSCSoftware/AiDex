@@ -17,7 +17,7 @@ import { PanelStore } from './panel-store.js';
 import { ControlStore } from './control-store.js';
 import { broadcastLogEntry, broadcastPanelUpdate, broadcastPanelClear } from '../viewer/server.js';
 import type { LogEntry, LogLevel, LogConfig, LogStats, LogHttpEntry } from './log-types.js';
-import { CONTROL_TYPES, type PanelHttpEntry, type WidgetType } from './panel-types.js';
+import { CONTROL_TYPES, BUTTON_COUNTER_MAX, type PanelHttpEntry, type WidgetType } from './panel-types.js';
 
 const VALID_LEVELS = new Set<string>(['debug', 'info', 'warn', 'error']);
 const BODY_LIMIT = '64kb';
@@ -169,8 +169,29 @@ export function initLogHub(config: LogConfig): Promise<string> {
         res.status(200).json({ id: body.id.trim(), value: body.value });
     });
 
+    // POST /control/press — register ONE press of a button control. body: { id }.
+    // Separate from POST /control on purpose: the caller says "it was pressed"
+    // and the HUB owns the counter. If the viewer computed the next value
+    // itself, two open dashboards would both send the same number and one press
+    // would be lost.
+    app.post('/control/press', (req, res) => {
+        const body = (req.body ?? {}) as { id?: string };
+        if (!controlStore || typeof body.id !== 'string' || !body.id.trim()) {
+            res.status(400).json({ error: 'press requires { id }' });
+            return;
+        }
+        const count = pressButton(body.id);
+        if (count === null) {
+            res.status(400).json({ error: 'unknown id, or widget is not a button' });
+            return;
+        }
+        res.status(200).json({ id: body.id.trim(), value: count });
+    });
+
     // GET /control — the whole store as a flat { id: value } object. This is
     // what a source (e.g. the ESP32) polls to learn the current set-points.
+    // Button entries are press COUNTERS: compare against the last value you saw,
+    // and treat any backwards jump as a restart rather than as presses.
     app.get('/control', (_req, res) => {
         res.status(200).json(controlStore ? controlStore.getAll() : {});
     });
@@ -349,6 +370,32 @@ export function setControl(id: string, value: number | string): boolean {
 }
 
 /**
+ * Register ONE press of a button control: read the counter, add one, store it.
+ *
+ * Deliberately server-side rather than "the viewer sends the new count". Two
+ * browsers can have the same dashboard open; if each computed the next value
+ * from its own copy they would both send the same number and one press would
+ * vanish. Here the hub owns the counter, so presses from any number of viewers
+ * add up. Returns the new count, or null if the id isn't a known button.
+ */
+export function pressButton(id: string): number | null {
+    if (!controlStore || !panelStore) return null;
+    const widget = panelStore.get(id);
+    if (!widget || widget.type !== 'button') return null;
+
+    const prev = controlStore.get(id);
+    const count = (typeof prev === 'number' && Number.isFinite(prev) ? prev : 0) + 1;
+    // Wrap rather than grow forever. Sources are told to read any backwards
+    // jump as "restart, adopt the value" — see BUTTON_COUNTER_MAX.
+    const next = count > BUTTON_COUNTER_MAX ? 1 : count;
+
+    if (!controlStore.set(id, next)) return null;
+    const updated = panelStore.upsert({ id, value: next });
+    if (updated) broadcastPanelUpdate(updated);
+    return next;
+}
+
+/**
  * Read all control values as a flat { id: value } map (for the MCP tool).
  */
 export function getControlValues(): Record<string, number | string> {
@@ -409,13 +456,19 @@ function ingestPanel(body: PanelHttpEntry) {
     if (!panelStore) return null;
     const widget = panelStore.upsert(body);
     if (!widget) return null;
-    // When a source DEFINES an interactive control (slider/number), seed the
-    // control store with its starting value — but only if the store has no value
-    // for it yet. That way a re-defining source (e.g. the ESP32 re-announcing its
-    // widgets after a reboot) does NOT clobber a value the user already dialed in.
+    // When a source DEFINES an interactive control, seed the control store with
+    // its starting value — but only if the store has no value for it yet. That
+    // way a re-defining source (e.g. the ESP32 re-announcing its widgets after a
+    // reboot) does NOT clobber a value the user already dialed in. For a button
+    // that also means the press count SURVIVES the source rebooting.
     if (controlStore && CONTROL_TYPES.has(widget.type as WidgetType)
-        && typeof widget.value === 'number' && controlStore.get(widget.id) === undefined) {
-        controlStore.set(widget.id, widget.value);
+        && controlStore.get(widget.id) === undefined) {
+        // A button is a counter and always starts at 0 — whatever the sender put
+        // in `value` would be a meaningless press count.
+        const seed = widget.type === 'button'
+            ? 0
+            : (typeof widget.value === 'number' ? widget.value : undefined);
+        if (seed !== undefined) controlStore.set(widget.id, seed);
     }
     broadcastPanelUpdate(widget);
     return widget;

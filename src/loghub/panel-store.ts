@@ -9,9 +9,14 @@
  * Sibling of log-buffer.ts (LogBuffer) — same singleton-state pattern.
  */
 
-import type { PanelHttpEntry, PanelWidget, WidgetType } from './panel-types.js';
+import { CONTROL_TYPES, type PanelHttpEntry, type PanelWidget, type WidgetType } from './panel-types.js';
 
-const VALID_TYPES = new Set<WidgetType>(['label', 'progress', 'gauge', 'plot', 'slider', 'number']);
+// Display types + every interactive one. Built from CONTROL_TYPES rather than
+// spelled out, so adding a control type does not silently get rejected here.
+const VALID_TYPES = new Set<WidgetType>([
+    'label', 'progress', 'gauge', 'plot',
+    ...CONTROL_TYPES,
+]);
 const PLOT_HISTORY = 200;          // samples kept per plot widget
 const MAX_FRAME_SAMPLES = 4096;    // cap when a full array frame is sent
 const MAX_WIDGETS = 500;           // safety cap on distinct widget ids
@@ -92,6 +97,11 @@ export class PanelStore {
         w.lastUpdate = Date.now();
         this.widgets.set(id, w);
         return w;
+    }
+
+    /** One widget by id, or undefined if unknown. */
+    get(id: string): PanelWidget | undefined {
+        return this.widgets.get(id.trim());
     }
 
     /** All widgets — for a freshly-connected viewer (snapshot on connect). */

@@ -10,16 +10,38 @@
  */
 
 // Display widgets are written BY a source and only rendered by AiDex.
-// `slider` and `number` are INTERACTIVE: the viewer renders an input the user
-// can change, and the new value flows back to the source via the Control Store
-// (POST /control → GET /control). They reuse the same fields (min/max/value/
-// step/label/group/order) — the only difference is the viewer makes them
-// editable. Like everything else here: the SENDER decides, AiDex only renders.
-export type WidgetType = 'label' | 'progress' | 'gauge' | 'plot' | 'slider' | 'number';
+// `slider`, `number`, `toggle` and `button` are INTERACTIVE: the viewer renders
+// an input the user can change, and the new value flows back to the source via
+// the Control Store (POST /control → GET /control). They reuse the same fields
+// (min/max/value/step/label/group/order) — the only difference is the viewer
+// makes them editable. Like everything else here: the SENDER decides, AiDex
+// only renders.
+//
+// The two event/state controls differ in an important way:
+//   toggle — STATE. Value is 0 or 1 and simply persists, like a slider with two
+//            positions. Reading it late still gives the right answer.
+//   button — EVENT. Value is a monotonically rising COUNTER, not a flag. A
+//            source polls at its own pace, so a boolean "pressed" would be lost
+//            between two polls; with a counter the source compares against the
+//            last value it saw and learns both THAT and HOW OFTEN it was pressed.
+//            See BUTTON_COUNTER_MAX below for the wrap/reset contract.
+export type WidgetType = 'label' | 'progress' | 'gauge' | 'plot' | 'slider' | 'number' | 'toggle' | 'button';
 
 // Interactive types whose value the user can change in the viewer. Kept as a
 // runtime set so both the store and the viewer agree on "is this a control?".
-export const CONTROL_TYPES = new Set<WidgetType>(['slider', 'number']);
+export const CONTROL_TYPES = new Set<WidgetType>(['slider', 'number', 'toggle', 'button']);
+
+/**
+ * Button counters wrap here instead of growing without bound.
+ *
+ * A source detects a press by comparing the current counter against the last
+ * one it saw. That means it must treat ANY backwards jump as "restart, adopt
+ * the new value" rather than as a press count — which happens on wrap, on
+ * POST /panel/clear, and whenever the hub restarts. Kept well inside the range
+ * where common integer types (and JS numbers) are exact, so a 32-bit device
+ * reading the value sees the same number we sent.
+ */
+export const BUTTON_COUNTER_MAX = 1_000_000;
 
 /**
  * HTTP body for POST /panel (and array of these for POST /panels).

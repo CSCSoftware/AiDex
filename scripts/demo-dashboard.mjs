@@ -65,6 +65,53 @@ async function defineWidgets() {
     // --- Signals: a clean waveform generator cycling through shapes ---
     await panel({ id: 'siggen', type: 'plot',  group: 'Signals', label: 'Signal Gen', color: 'purple', order: 0 });
     await panel({ id: 'sigform', type: 'label', group: 'Signals', label: 'Waveform',   color: 'purple', order: 1 });
+
+    // --- Controls: the interactive widgets. Unlike everything above, these are
+    // written BY the user and read back by this script (GET /control) — the
+    // dashboard talking back to its source.
+    await panel({ id: 'gain',   type: 'slider', group: 'Controls', label: 'Gain',    color: 'cyan',   unit: 'dB', min: -20, max: 20, step: 1, value: 0, order: 0 });
+    // A toggle is STATE. `unit` doubles as the two captions, "on|off".
+    await panel({ id: 'mute',   type: 'toggle', group: 'Controls', label: 'Mute',    color: 'orange', unit: 'MUTED|LIVE', value: 0, order: 1 });
+    await panel({ id: 'freeze', type: 'toggle', group: 'Controls', label: 'Freeze Plots', color: 'blue', value: 0, order: 2 });
+    // A button is an EVENT: its value is a press counter, so this script can
+    // tell "was pressed" from "was pressed three times" even though it only
+    // looks every TICK_MS.
+    await panel({ id: 'reset',  type: 'button', group: 'Controls', label: 'Reset Peaks', color: 'red', order: 3 });
+    await panel({ id: 'presses', type: 'label', group: 'Controls', label: 'Reset Count', color: 'red', unit: 'x', value: 0, order: 4 });
+}
+
+// --- Reading the controls back (the point of interactive widgets) -----------
+// Mirrors what a real source does: poll GET /control, compare the button counter
+// against the last value seen, and treat any BACKWARDS jump as a restart rather
+// than as presses (the hub wraps at 1e6, and /panel/clear resets to 0).
+let ctl = { gain: 0, mute: 0, freeze: 0 };
+let lastPressCount = null;
+let resetsSeen = 0;
+
+async function pollControls() {
+    try {
+        const res = await fetch(`${BASE}/control`);
+        if (!res.ok) return;
+        const values = await res.json();
+
+        if (typeof values.gain === 'number') ctl.gain = values.gain;
+        if (typeof values.mute === 'number') ctl.mute = values.mute;
+        if (typeof values.freeze === 'number') ctl.freeze = values.freeze;
+
+        const count = values.reset;
+        if (typeof count === 'number') {
+            if (lastPressCount === null || count < lastPressCount) {
+                lastPressCount = count;          // first look, or hub restarted
+            } else if (count > lastPressCount) {
+                resetsSeen += count - lastPressCount;   // no press is lost
+                lastPressCount = count;
+                panel({ id: 'presses', value: resetsSeen });
+                console.log(`  [control] Reset pressed (total ${resetsSeen})`);
+            }
+        }
+    } catch {
+        /* hub gone — keep the last known values, exactly like a device would */
+    }
 }
 
 // Clean periodic waveforms in [-1, 1]. `p` is the phase fraction 0..1.
@@ -86,9 +133,15 @@ function update() {
     // Slow envelopes so gauges drift through their zones over ~20-40s.
     const slow = (period, phase = 0) => Math.sin((t / period) * Math.PI * 2 + phase) * 0.5 + 0.5; // 0..1
 
+    // Freeze holds the plots still so you can read them — proof that a toggle
+    // actually reaches the source, not just the screen.
+    if (ctl.freeze) return;
+
     // Audio: a noisy waveform with occasional "speech bursts".
+    // Mute silences it and Gain scales it — both driven by the Controls group.
     const burst = slow(8) > 0.6 ? 1 : 0.15;
-    const mic = Math.sin(t * 9) * 18 * burst + (Math.random() - 0.5) * 6;
+    const gainFactor = ctl.mute ? 0 : Math.pow(10, ctl.gain / 20);
+    const mic = (Math.sin(t * 9) * 18 * burst + (Math.random() - 0.5) * 6) * gainFactor;
     panel({ id: 'mic', value: +mic.toFixed(2) });
     const speech = Math.min(1, burst * (0.6 + Math.random() * 0.4));
     panel({ id: 'speech', value: +speech.toFixed(2) });
@@ -146,11 +199,16 @@ async function main() {
     await defineWidgets();
 
     const timer = setInterval(update, TICK_MS);
+    // Controls are polled far slower than the draw loop (500 ms vs 60 ms) — on
+    // purpose. It mirrors a real device and shows why a button must be a COUNTER:
+    // clicks landing between two polls are still all counted.
+    const ctlTimer = setInterval(pollControls, 500);
 
     const stop = async () => {
         if (!alive) return;
         alive = false;
         clearInterval(timer);
+        clearInterval(ctlTimer);
         console.log('\nStopping demo, clearing dashboard...');
         await clearAll();
         process.exit(0);
