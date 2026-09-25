@@ -743,6 +743,9 @@ AI ←──control_get──── result ─ Hub  ←──POST /control──
 - **`POST /control`** — your app writes back results / acknowledgements.
 - **`POST /control/press { id }`** — registers one press of a `button` control. The hub owns the counter, so presses from several open dashboards add up instead of overwriting each other.
 - **`control_get`** — the AI reads what the app reported.
+- **`POST /control/subscribe`** *(optional)* — push instead of polling, see below.
+
+**Push instead of poll.** If your app runs its own HTTP server, it can subscribe once with `{ "port": 8080 }` (the hub calls back the sender's address, path defaults to `/control`) or a full `{ "url": "http://192.168.1.50:8080/control" }`, optionally limited to `{ "ids": [...] }`. From then on every change is POSTed to that URL right away, as the same flat `{ id: value }` map `GET /control` returns. No idle requests, no latency until the next poll. The hub never blocks on your app (1.5 s timeout, one request in flight, changes in between are merged so the latest value always arrives last), only calls private-network IP addresses, and drops the subscription after 3 failed deliveries — re-subscribing is idempotent, do it whenever you like. `POST /control/unsubscribe { url }` removes it. Push is an addition, not a replacement: keep a slow poll (~30 s) as a safety net; button counters make a missed push harmless.
 
 > A `button` value is a **press counter**, not a flag — your app polls at its own pace, so compare against the last count you saw rather than testing for "pressed". Any backwards jump means the hub restarted or the panel was cleared: adopt the value, don't read it as a million presses.
 

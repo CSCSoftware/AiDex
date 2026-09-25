@@ -2825,6 +2825,13 @@ async function handleLog(args: Record<string, unknown>): Promise<{ content: Arra
                 msg += `Sources: ${s.sources.join(', ')}\n`;
                 msg += `Levels: ${Object.entries(s.levelCounts).map(([l, c]) => `${levelIcon[l] || ''} ${l}: ${c}`).join(' | ')}\n`;
             }
+            const subs = s.pushSubscribers ?? [];
+            msg += `Control push: ${subs.length === 0 ? 'no subscribers (sources poll GET /control)' : `${subs.length} subscriber(s)`}\n`;
+            for (const sub of subs) {
+                msg += `- ${sub.url} — ${sub.ids ? sub.ids.join(', ') : 'all controls'}, delivered ${sub.delivered}`;
+                if (sub.failures > 0) msg += `, ${sub.failures} failure(s): ${sub.lastError}`;
+                msg += '\n';
+            }
             return { content: [{ type: 'text', text: msg.trimEnd() }] };
         }
 

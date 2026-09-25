@@ -2,6 +2,12 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Control push** — sources no longer have to poll `GET /control` every second to notice a slider move or a button press. A source with its own HTTP server calls **`POST /control/subscribe`** with `{ port, path? }` (the hub calls back the sender's address — IPv4-mapped IPv6 like `::ffff:192.168.1.50` is normalized) or an explicit `{ url }`, optionally filtered by `{ ids }`. Every change — from the dashboard, from `control_set`, from a button press — is then POSTed there as the same flat `{ id: value }` map `GET /control` returns. Delivery is fire & forget with a 1.5 s timeout and never blocks the dashboard; one request per subscriber is in flight, changes arriving meanwhile are merged so a slider drag cannot arrive out of order. After 3 failed deliveries in a row the subscription is dropped (logged as a `warn` from source `loghub`) so the hub never keeps knocking on a dead device. Callback URLs are foreign input: plain `http` to loopback, private or link-local IP literals only, no DNS names, no redirects. `POST /control/unsubscribe { url }` removes one; `aidex_log status` lists them. Polling keeps working unchanged — push is an addition.
+
 ## [2.3.0] - 2026-08-06
 
 Two new dashboard controls, Kotlin and Swift, and three Viewer fixes — one of which could freeze the whole MCP server.

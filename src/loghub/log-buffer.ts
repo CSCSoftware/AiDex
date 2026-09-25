@@ -102,7 +102,7 @@ export class LogBuffer {
     /**
      * Get buffer statistics
      */
-    getStats(): Omit<LogStats, 'port' | 'persist'> {
+    getStats(): Omit<LogStats, 'port' | 'persist' | 'pushSubscribers'> {
         const usage = this.size > 0 ? Math.round((this.count / this.size) * 100) : 0;
 
         let oldestId = 0;

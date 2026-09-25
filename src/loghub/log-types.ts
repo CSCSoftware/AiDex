@@ -67,6 +67,7 @@ export interface LogStats {
     oldestId: number;
     newestId: number;
     persist: boolean;
+    pushSubscribers: Array<{ url: string; ids: string[] | null; failures: number; delivered: number; lastError?: string }>;
 }
 
 export interface LogHttpEntry {

@@ -404,6 +404,10 @@ Neben dem scrollenden Log-Stream gibt es ein **Live-Dashboard** mit festen Slots
 | `/panel/clear` | POST | `{ id? }` | Ein Widget (id) oder alle (leer) entfernen |
 | `/control` | POST/GET | `{ id, value }` / — | Control-Wert setzen; GET liefert alle als `{ id: value }` (das pollt die Quelle) |
 | `/control/press` | POST | `{ id }` | Einen Tastendruck melden — der **Hub** zählt hoch, nicht der Aufrufer |
+| `/control/subscribe` | POST | `{ url }` oder `{ port, path? }`, opt. `{ ids }` | **Push statt Poll** (optional): Hub POSTet jede Änderung als `{ id: value }` an die Quelle |
+| `/control/unsubscribe` | POST | `{ url }` | Push-Abo entfernen |
+
+**Push-Regeln** (`src/loghub/control-push.ts`): fire & forget, 1,5 s Timeout, pro Abonnent ein Request unterwegs, Zwischenänderungen werden zusammengefasst (neuester Wert kommt zuletzt). Nach 3 Fehlschlägen wird das Abo verworfen (warn-Log, Source `loghub`), Quelle abonniert einfach neu (idempotent). Nur `http` an Loopback/private/Link-Local-IPs, keine DNS-Namen, keine Redirects. `GET /control` bleibt — Quellen sollten langsam weiterpollen (~30 s) als Netz. Test: `node scripts/test-control-push.mjs` (startet eigenen Hub auf 3399).
 
 ### Widget-Felder
 

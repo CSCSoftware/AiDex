@@ -15,6 +15,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { LogBuffer } from './log-buffer.js';
 import { PanelStore } from './panel-store.js';
 import { ControlStore } from './control-store.js';
+import { ControlPush, type SubscribeRequest, type SubscriberInfo } from './control-push.js';
 import { broadcastLogEntry, broadcastPanelUpdate, broadcastPanelClear } from '../viewer/server.js';
 import type { LogEntry, LogLevel, LogConfig, LogStats, LogHttpEntry } from './log-types.js';
 import { CONTROL_TYPES, BUTTON_COUNTER_MAX, type PanelHttpEntry, type WidgetType } from './panel-types.js';
@@ -40,6 +41,7 @@ let logBuffer: LogBuffer | null = null;
 let logConfig: LogConfig | null = null;
 let panelStore: PanelStore | null = null;
 let controlStore: ControlStore | null = null;
+let controlPush: ControlPush | null = null;
 
 // Optional DB persistence
 let logDb: BetterSqlite3.Database | null = null;
@@ -57,6 +59,13 @@ export function initLogHub(config: LogConfig): Promise<string> {
     logConfig = config;
     panelStore = new PanelStore();
     controlStore = new ControlStore();
+    // Push events land in the log stream so the user sees subscribe/drop.
+    controlPush = new ControlPush((level, message) => {
+        if (!logBuffer) return;
+        const entry = logBuffer.push(level, 'loghub', message);
+        persistEntry(entry);
+        broadcastLogEntry(entry);
+    });
 
     // Optional DB persistence
     if (config.persist && config.path) {
@@ -186,6 +195,36 @@ export function initLogHub(config: LogConfig): Promise<string> {
             return;
         }
         res.status(200).json({ id: body.id.trim(), value: count });
+    });
+
+    // POST /control/subscribe — OPTIONAL push instead of (well: on top of)
+    // polling. A source with its own HTTP server registers a callback; the hub
+    // then POSTs every change there as a flat { id: value } map, the same shape
+    // GET /control returns. body: { url } or { port, path? }, plus optional
+    // { ids: [...] } to limit which controls are pushed. With only `port` the
+    // hub calls back the SENDER's address. Idempotent — re-subscribe freely.
+    // See control-push.ts for the delivery rules.
+    app.post('/control/subscribe', (req, res) => {
+        if (!controlPush) {
+            res.status(503).json({ error: 'hub not running' });
+            return;
+        }
+        const result = controlPush.subscribe((req.body ?? {}) as SubscribeRequest, req.socket.remoteAddress);
+        if ('error' in result) {
+            res.status(400).json({ error: result.error });
+            return;
+        }
+        res.status(200).json({ url: result.url });
+    });
+
+    // POST /control/unsubscribe — body: { url } (as returned by subscribe).
+    app.post('/control/unsubscribe', (req, res) => {
+        const body = (req.body ?? {}) as { url?: string };
+        if (!controlPush || typeof body.url !== 'string') {
+            res.status(400).json({ error: 'unsubscribe requires { url }' });
+            return;
+        }
+        res.status(200).json({ removed: controlPush.unsubscribe(body.url) });
     });
 
     // GET /control — the whole store as a flat { id: value } object. This is
@@ -318,6 +357,8 @@ export function freeLogHub(): string {
     logConfig = null;
     panelStore = null;
     controlStore = null;
+    controlPush?.close();
+    controlPush = null;
 
     console.error('[LogHub] Server stopped');
     return `Log Hub stopped (port ${port} freed)`;
@@ -366,6 +407,7 @@ export function setControl(id: string, value: number | string): boolean {
     // slider position and any other connected viewer stay in sync.
     const widget = panelStore?.upsert({ id, value });
     if (widget) broadcastPanelUpdate(widget);
+    controlPush?.notify(id.trim(), value);
     return true;
 }
 
@@ -392,6 +434,7 @@ export function pressButton(id: string): number | null {
     if (!controlStore.set(id, next)) return null;
     const updated = panelStore.upsert({ id, value: next });
     if (updated) broadcastPanelUpdate(updated);
+    controlPush?.notify(id.trim(), next);
     return next;
 }
 
@@ -400,6 +443,13 @@ export function pressButton(id: string): number | null {
  */
 export function getControlValues(): Record<string, number | string> {
     return controlStore ? controlStore.getAll() : {};
+}
+
+/**
+ * Current push subscriptions (for status display).
+ */
+export function getControlSubscribers(): SubscriberInfo[] {
+    return controlPush ? controlPush.list() : [];
 }
 
 /**
@@ -430,6 +480,7 @@ export function getLogStats(): LogStats | null {
         ...bufferStats,
         port: logConfig.port,
         persist: logConfig.persist,
+        pushSubscribers: getControlSubscribers(),
     };
 }
 
