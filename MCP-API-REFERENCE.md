@@ -43,6 +43,7 @@ Complete reference for all AiDex MCP tools.
   - [aidex_global_guideline](#aidex_global_guideline)
 - [Log Hub](#log-hub)
   - [aidex_log](#aidex_log)
+  - [Dashboard & Control API](#dashboard--control-api)
 - [Screenshots](#screenshots)
   - [aidex_screenshot](#aidex_screenshot)
   - [aidex_windows](#aidex_windows)
@@ -1000,7 +1001,7 @@ Universal log receiver — any program (C#, Python, Node, etc.) can send logs vi
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `action` | string | ✅ | `init`, `free`, `status`, `query`, `clear`, or `write` |
+| `action` | string | ✅ | `init`, `free`, `status`, `query`, `clear`, `write`, `control_get`, or `control_set` |
 | `port` | number | - | HTTP port (default: `3335`, used with `init`) |
 | `buffer_size` | number | - | Ring buffer size (default: `10000`, used with `init`) |
 | `persist` | boolean | - | Enable SQLite persistence (default: `false`, used with `init`) |
@@ -1013,6 +1014,8 @@ Universal log receiver — any program (C#, Python, Node, etc.) can send logs vi
 | `consume` | boolean | - | If true, returned entries are removed from buffer — ideal for polling without duplicates (default: `false`, used with query) |
 | `message` | string | for write | Log message text |
 | `data` | string | - | Optional JSON data (write) |
+| `id` | string | for control_set | Control id to change |
+| `value` | number \| string | for control_set | New control value |
 
 **Actions:**
 
@@ -1020,10 +1023,12 @@ Universal log receiver — any program (C#, Python, Node, etc.) can send logs vi
 |--------|-------------|
 | `init` | Start HTTP server and ring buffer. Optional: `persist` + `path` for SQLite storage |
 | `free` | Stop server, free all resources, release port |
-| `status` | Show stats: entries, buffer usage, sources, level counts, port |
+| `status` | Show stats: entries, buffer usage, sources, level counts, port, control push subscribers |
 | `query` | Search logs with filters (since, level, source, contains, limit, consume). Newest first |
 | `clear` | Clear the ring buffer (keep server running) |
 | `write` | Inject a log entry as source "claude" |
+| `control_get` | Read all interactive control values as `{ id: value }` |
+| `control_set` | Set one control (`id` + `value`) — same path as a dashboard slider, so subscribed sources get it pushed |
 
 **HTTP API (for external programs):**
 
@@ -1088,6 +1093,57 @@ Invoke-RestMethod -Method Post -Uri http://localhost:3335/log -ContentType "appl
 ```
 
 **Viewer integration:** When the Viewer is running, a "Logs" tab shows live log entries via WebSocket with client-side filtering (level, source, text search, auto-scroll).
+
+### Dashboard & Control API
+
+Besides the scrolling log stream, the Log Hub keeps a **live dashboard** (Viewer → Live tab). Every widget has a fixed `id`; sending the same `id` again overwrites the value in place. Interactive widgets form a **return channel**: the user (or the AI via `control_set`) changes a value, and your program picks it up.
+
+**Widget endpoints:**
+
+| Endpoint | Method | Body | Description |
+|----------|--------|------|-------------|
+| `/panel` | POST | `{ id, type, value, group?, label?, unit?, min?, max?, step?, warn?, crit?, color?, order? }` | Create or update one widget |
+| `/panels` | POST | `[{ ... }, ...]` | Batch |
+| `/panel/clear` | POST | `{ id? }` | Remove one widget, or all (empty body) |
+
+Display types: `label`, `progress`, `gauge`, `plot`. Interactive types: `slider`, `number`, `toggle` (value `0`/`1`), `button` (value is a **press counter**, see below).
+
+**Control endpoints:**
+
+| Endpoint | Method | Body | Description |
+|----------|--------|------|-------------|
+| `/control` | GET | - | All control values as a flat `{ id: value }` map — poll this |
+| `/control` | POST | `{ id, value }` | Set one control value |
+| `/control/press` | POST | `{ id }` | Register one press of a `button`; the hub owns the counter |
+| `/control/subscribe` | POST | `{ url }` or `{ port, path? }`, optional `{ ids }` | **Push:** have the hub POST every change to your program |
+| `/control/unsubscribe` | POST | `{ url }` | Remove a push subscription |
+
+**Poll or push — your choice.**
+
+- **Poll** (zero-config, works everywhere, also behind NAT or from a browser): `GET /control` at your own pace.
+- **Push** (for programs that run their own HTTP server): subscribe once, and every change arrives immediately — no idle requests, no latency until the next poll.
+
+```json
+// Subscribe with just your server port — the hub calls back the address the request came from
+POST /control/subscribe   { "port": 8080 }                       → { "url": "http://192.168.1.50:8080/control" }
+
+// Or give the full URL, and only get the controls you care about
+POST /control/subscribe   { "url": "http://192.168.1.50:8080/hub", "ids": ["gain", "reset_btn"] }
+
+// What your server then receives, on every change (same shape as GET /control):
+POST http://192.168.1.50:8080/hub   { "gain": 42 }
+```
+
+Delivery rules:
+
+- **Never blocks the dashboard** — fire & forget with a 1.5 s timeout.
+- **Ordered** — one request in flight per subscriber; changes arriving meanwhile are merged into the next batch, so the latest value always arrives last.
+- **Self-cleaning** — after 3 failed deliveries in a row the subscription is dropped (logged as `warn` from source `loghub`). Subscribing is idempotent: just subscribe again, e.g. on startup and with every slow poll.
+- **Local network only** — callbacks must be plain `http` to a loopback, private (`10.x`, `172.16–31.x`, `192.168.x`) or link-local IP address. No DNS names, no redirects.
+- **Push is an addition, not a replacement.** Keep a slow poll (~30 s) as a safety net — a missed push is then repaired automatically.
+- If your program writes results back via `POST /control`, it will get them pushed back as well; use `ids` to subscribe only to the controls you actually consume.
+
+**Button counters:** a button's value rises by one per press. Compare against the last value you saw — the difference is the number of presses. Any backwards jump (wrap at 1,000,000, `/panel/clear`, hub restart) means "restart, adopt the value", not a million presses.
 
 ---
 

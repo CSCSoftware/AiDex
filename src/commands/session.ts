@@ -90,11 +90,10 @@ const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
 // ============================================================
 
 const RELEASE_HIGHLIGHTS: string[] = [
-    'New tool: aidex_global_guideline — store AI guidelines and coding conventions in global.db',
-    'Security fixes: command injection, SQL injection, WebSocket validation, path whitelisting',
-    'Viewer fixes: N+1 queries eliminated, race condition fixed, 1 MB file size limit added',
-    'Refactored: hasTool/runPowerShell/normalizePath/escapeLikeTerm centralized — no more duplicates',
-    'AI strategy: tool description guides assistants to start aggressive, retry if unreadable, remember per app',
+    'Control push: POST /control/subscribe lets a program with its own HTTP server receive dashboard changes instantly instead of polling GET /control',
+    'Push is additive: polling keeps working; dead subscribers are dropped after 3 failed deliveries; callbacks limited to the local network',
+    'aidex_log status now lists push subscribers',
+    'MCP-API-REFERENCE.md: new "Dashboard & Control API" section (panels, controls, button counters, push rules)',
 ];
 
 // ============================================================
