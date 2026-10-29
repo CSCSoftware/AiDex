@@ -481,7 +481,11 @@ function findUnindexedProjects(searchPath: string, maxDepth: number, indexedPath
         }
     }
 
-    function walk(dirPath: string, depth: number): void {
+    // C/C++ build files in a subdirectory of a C/C++ project are sub-builds
+    // (ggml/src/ggml-cuda, examples/*, tests), not projects of their own.
+    const BUILD_MARKERS = new Set(['CMakeLists.txt', 'Makefile', 'meson.build']);
+
+    function walk(dirPath: string, depth: number, insideCBuild = false): void {
         if (depth > maxDepth) return;
 
         const normalizedPath = dirPath.replace(/\\/g, '/');
@@ -497,7 +501,9 @@ function findUnindexedProjects(searchPath: string, maxDepth: number, indexedPath
 
         // Check for project markers
         const markers = detectProjectMarkers(dirPath);
-        if (markers.length > 0) {
+        const isCBuild = markers.some(m => BUILD_MARKERS.has(m));
+        const onlyBuildMarkers = markers.length > 0 && markers.every(m => BUILD_MARKERS.has(m));
+        if (markers.length > 0 && !(insideCBuild && onlyBuildMarkers)) {
             projects.push({
                 path: dirPath,
                 name: basename(dirPath),
@@ -514,7 +520,7 @@ function findUnindexedProjects(searchPath: string, maxDepth: number, indexedPath
                 if (!entry.isDirectory()) continue;
                 if (entry.name.startsWith('.')) continue;
                 if (excludedDirs.has(entry.name)) continue;
-                walk(join(dirPath, entry.name), depth + 1);
+                walk(join(dirPath, entry.name), depth + 1, insideCBuild || isCBuild);
             }
         } catch {
             // Skip unreadable directories
