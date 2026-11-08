@@ -66,13 +66,17 @@ export function postProcess(filePath: string, options: PostProcessOptions): Post
 // ============================================================
 
 function postProcessWindows(filePath: string, options: PostProcessOptions): void {
-    const escapedPath = filePath.replace(/\\/g, '\\\\').replace(/'/g, "''");
-    const scale = options.scale ?? 1.0;
+    // Security: path and scale are passed via environment variables, never
+    // interpolated into the script source. Only values from fixed whitelists
+    // (bpp / colors) are inserted into the script text below.
+    const scale = typeof options.scale === 'number' && Number.isFinite(options.scale) ? options.scale : 1.0;
     const colors = options.colors;
 
     // Map color count to bits-per-pixel for indexed formats
     const colorToBpp: Record<number, number> = { 2: 1, 4: 4, 16: 4, 256: 8 };
-    const bpp = colors ? colorToBpp[colors] : undefined;
+    const bpp = colors !== undefined && Object.prototype.hasOwnProperty.call(colorToBpp, colors)
+        ? colorToBpp[colors]
+        : undefined;
 
     // Build PowerShell script that:
     // 1. Loads the image
@@ -82,11 +86,13 @@ function postProcessWindows(filePath: string, options: PostProcessOptions): void
     const script = `
 Add-Type -AssemblyName System.Drawing
 
-$src = [System.Drawing.Image]::FromFile('${escapedPath}')
+$imgPath = $env:AIDEX_PP_PATH
+$scale = [double]$env:AIDEX_PP_SCALE
+$src = [System.Drawing.Image]::FromFile($imgPath)
 
 # Calculate new dimensions
-$newW = [int]([Math]::Round($src.Width * ${scale}))
-$newH = [int]([Math]::Round($src.Height * ${scale}))
+$newW = [int]([Math]::Round($src.Width * $scale))
+$newH = [int]([Math]::Round($src.Height * $scale))
 
 # Create scaled bitmap
 $scaled = New-Object System.Drawing.Bitmap($newW, $newH)
@@ -114,15 +120,18 @@ ${colors === 2 ? `
 ` : colors === 4 ? `
 # 4bpp with limited palette - good text readability with some gray shading
 ` : ''}
-$indexed.Save('${escapedPath}', [System.Drawing.Imaging.ImageFormat]::Png)
+$indexed.Save($imgPath, [System.Drawing.Imaging.ImageFormat]::Png)
 $indexed.Dispose()
 ` : `
-$scaled.Save('${escapedPath}', [System.Drawing.Imaging.ImageFormat]::Png)
+$scaled.Save($imgPath, [System.Drawing.Imaging.ImageFormat]::Png)
 $scaled.Dispose()
 `}
 `;
 
-    runPowerShell(script);
+    runPowerShell(script, 30000, 'aidex', {
+        AIDEX_PP_PATH: filePath,
+        AIDEX_PP_SCALE: String(scale),
+    });
 }
 
 // ============================================================

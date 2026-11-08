@@ -4,11 +4,45 @@
  * Uses native `screencapture` and `osascript` commands.
  * macOS has excellent built-in support for all capture modes.
  *
+ * Security: every external tool is started via execFileSync with an argument
+ * array (no shell). User-supplied strings (paths, window titles) are never
+ * interpolated into a shell command or an AppleScript source; window titles
+ * are passed to osascript as a `run` handler argument.
+ *
  * v1.9.0
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
+import { unlinkSync } from 'fs';
 import type { PlatformScreenshot, WindowInfo } from './types.js';
+
+// ============================================================
+// Helpers
+// ============================================================
+
+const PIPE: ['pipe', 'pipe', 'pipe'] = ['pipe', 'pipe', 'pipe'];
+
+/** Run screencapture with the given arguments (no shell). */
+function screencapture(args: string[], timeout = 10000): void {
+    execFileSync('screencapture', args, { timeout, stdio: PIPE });
+}
+
+/**
+ * Run an AppleScript via osascript (no shell). Extra arguments are passed to
+ * the script's `on run argv` handler.
+ */
+function osascript(script: string, args: string[] = []): string {
+    return execFileSync('osascript', ['-e', script, ...args], {
+        encoding: 'utf8',
+        timeout: 10000,
+        stdio: PIPE,
+    }).trim();
+}
+
+/** A window id returned by osascript must be a plain positive integer. */
+function parseWindowId(raw: string): string | null {
+    return /^[1-9]\d*$/.test(raw) ? raw : null;
+}
 
 // ============================================================
 // Platform Implementation
@@ -18,15 +52,9 @@ export const darwinPlatform: PlatformScreenshot = {
     captureFullscreen(filePath: string, monitor?: number): void {
         if (monitor !== undefined) {
             // -D<display> selects monitor (1-based in screencapture)
-            execSync(`screencapture -x -D${monitor + 1} "${filePath}"`, {
-                timeout: 10000,
-                stdio: ['pipe', 'pipe', 'pipe'],
-            });
+            screencapture(['-x', `-D${Math.trunc(monitor) + 1}`, filePath]);
         } else {
-            execSync(`screencapture -x "${filePath}"`, {
-                timeout: 10000,
-                stdio: ['pipe', 'pipe', 'pipe'],
-            });
+            screencapture(['-x', filePath]);
         }
     },
 
@@ -39,80 +67,68 @@ tell application "System Events"
     return id of frontWin
 end tell`;
         try {
-            const windowId = execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
-                encoding: 'utf8',
-                timeout: 10000,
-                stdio: ['pipe', 'pipe', 'pipe'],
-            }).trim();
-            execSync(`screencapture -x -l${windowId} "${filePath}"`, {
-                timeout: 10000,
-                stdio: ['pipe', 'pipe', 'pipe'],
-            });
+            const windowId = parseWindowId(osascript(script));
+            if (!windowId) throw new Error('No valid window id');
+            screencapture(['-x', `-l${windowId}`, filePath]);
         } catch {
             // Fallback: use interactive window capture (space selects window)
             // -w captures window under cursor, -o excludes shadow
-            execSync(`screencapture -x -o -w "${filePath}"`, {
-                timeout: 30000,
-                stdio: ['pipe', 'pipe', 'pipe'],
-            });
+            screencapture(['-x', '-o', '-w', filePath], 30000);
         }
     },
 
     captureWindow(filePath: string, windowTitle: string): void {
-        const escapedTitle = windowTitle.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        // The title is passed as argv item, never interpolated into the script.
+        // It is prefixed with ":" so osascript's option parser can never mistake
+        // a title starting with "-" for an option (e.g. "-e ...").
         const script = `
-tell application "System Events"
-    set matchedId to 0
-    repeat with proc in (every application process whose visible is true)
-        repeat with w in (every window of proc)
-            if name of w contains "${escapedTitle}" then
-                set matchedId to id of w
-                exit repeat
-            end if
+on run argv
+    set rawArg to item 1 of argv
+    if (length of rawArg) < 2 then return 0
+    set searchTitle to text 2 thru -1 of rawArg
+    tell application "System Events"
+        set matchedId to 0
+        repeat with proc in (every application process whose visible is true)
+            repeat with w in (every window of proc)
+                if name of w contains searchTitle then
+                    set matchedId to id of w
+                    exit repeat
+                end if
+            end repeat
+            if matchedId > 0 then exit repeat
         end repeat
-        if matchedId > 0 then exit repeat
-    end repeat
-    return matchedId
-end tell`;
+        return matchedId
+    end tell
+end run`;
 
-        const windowId = execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
-            encoding: 'utf8',
-            timeout: 10000,
-            stdio: ['pipe', 'pipe', 'pipe'],
-        }).trim();
-
-        if (windowId === '0' || !windowId) {
+        const windowId = parseWindowId(osascript(script, [':' + windowTitle]));
+        if (!windowId) {
             throw new Error(`Window not found: "${windowTitle}". Use aidex_windows to list available windows.`);
         }
 
-        execSync(`screencapture -x -l${windowId} "${filePath}"`, {
-            timeout: 10000,
-            stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        screencapture(['-x', `-l${windowId}`, filePath]);
     },
 
     captureRect(filePath: string, x: number, y: number, width: number, height: number): void {
         // Capture fullscreen then crop with sips
         const tmpFile = filePath + '.tmp.png';
-        execSync(`screencapture -x "${tmpFile}"`, {
-            timeout: 10000,
-            stdio: ['pipe', 'pipe', 'pipe'],
-        });
-        // Crop using sips (built-in macOS tool)
-        execSync(`sips -c ${height} ${width} --cropOffset ${y} ${x} "${tmpFile}" --out "${filePath}"`, {
-            timeout: 10000,
-            stdio: ['pipe', 'pipe', 'pipe'],
-        });
-        try { execSync(`rm "${tmpFile}"`, { stdio: ['pipe', 'pipe', 'pipe'] }); } catch { /* ignore */ }
+        try {
+            screencapture(['-x', tmpFile]);
+            // Crop using sips (built-in macOS tool)
+            execFileSync('sips', [
+                '-c', String(Math.trunc(height)), String(Math.trunc(width)),
+                '--cropOffset', String(Math.trunc(y)), String(Math.trunc(x)),
+                tmpFile, '--out', filePath,
+            ], { timeout: 10000, stdio: PIPE });
+        } finally {
+            try { unlinkSync(tmpFile); } catch { /* ignore */ }
+        }
     },
 
     captureRegion(filePath: string): void {
         // -i enables interactive selection (crosshair cursor)
         // User can press Space to toggle window/selection mode, Escape to cancel
-        execSync(`screencapture -i "${filePath}"`, {
-            timeout: 120000,
-            stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        screencapture(['-i', filePath], 120000);
     },
 
     listWindows(): WindowInfo[] {
@@ -132,11 +148,7 @@ tell application "System Events"
     return output
 end tell`;
 
-        const output = execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
-            encoding: 'utf8',
-            timeout: 10000,
-            stdio: ['pipe', 'pipe', 'pipe'],
-        }).trim();
+        const output = osascript(script);
 
         if (!output) return [];
 

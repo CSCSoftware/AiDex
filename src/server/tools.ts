@@ -565,11 +565,11 @@ export function registerTools(): Tool[] {
                     },
                     filename: {
                         type: 'string',
-                        description: 'Custom filename (default: aidex-screenshot.png). Overwrites if exists.',
+                        description: 'Custom filename (default: aidex-screenshot.png). Overwrites if exists. Plain file name only (no path), extension .png/.jpg.',
                     },
                     save_path: {
                         type: 'string',
-                        description: 'Custom directory to save in (default: system temp directory)',
+                        description: 'Existing directory to save in (default: system temp directory)',
                     },
                     x: {
                         type: 'number',

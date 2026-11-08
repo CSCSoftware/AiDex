@@ -4,6 +4,12 @@
  * Uses PowerShell with .NET System.Drawing and Win32 API.
  * Scripts are written to temp .ps1 files to avoid quoting issues.
  *
+ * Security: the scripts are static. All dynamic values (output path, window
+ * title, monitor index, rectangle) are passed as environment variables
+ * (AIDEX_SS_*) and read via $env:... — nothing user-supplied is ever
+ * interpolated into the PowerShell source, so quotes, $(...) subexpressions,
+ * backticks or Unicode quote characters cannot break out.
+ *
  * v1.9.0
  */
 
@@ -12,38 +18,42 @@ import { runPowerShell } from './shared.js';
 
 // runPowerShell is imported from shared.ts (avoids duplication with post-process.ts)
 
+/** Format a validated number for an environment variable (integer only). */
+function intEnv(value: number): string {
+    return String(Math.trunc(value));
+}
+
 // ============================================================
-// PowerShell Scripts
+// PowerShell Scripts (static — inputs via $env:AIDEX_SS_*)
 // ============================================================
 
-function fullscreenScript(filePath: string, monitor?: number): string {
-    const escapedPath = filePath.replace(/\\/g, '\\\\').replace(/'/g, "''");
-    const screenSelector = monitor !== undefined
-        ? `[System.Windows.Forms.Screen]::AllScreens[${monitor}]`
-        : `[System.Windows.Forms.Screen]::PrimaryScreen`;
-
+function fullscreenScript(): string {
     return `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$screen = ${screenSelector}
+if ($env:AIDEX_SS_MONITOR) {
+    $monitorIndex = [int]$env:AIDEX_SS_MONITOR
+    $screen = [System.Windows.Forms.Screen]::AllScreens[$monitorIndex]
+} else {
+    $monitorIndex = 0
+    $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+}
 if (-not $screen) {
-    Write-Error "Monitor ${monitor ?? 0} not found"
+    Write-Error ("Monitor " + $monitorIndex + " not found")
     exit 1
 }
 $bounds = $screen.Bounds
 $bitmap = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-$bitmap.Save('${escapedPath}', [System.Drawing.Imaging.ImageFormat]::Png)
+$bitmap.Save($env:AIDEX_SS_PATH, [System.Drawing.Imaging.ImageFormat]::Png)
 $graphics.Dispose()
 $bitmap.Dispose()
 `;
 }
 
-function activeWindowScript(filePath: string): string {
-    const escapedPath = filePath.replace(/\\/g, '\\\\').replace(/'/g, "''");
-
+function activeWindowScript(): string {
     return `
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -74,16 +84,13 @@ if ($w -le 0 -or $h -le 0) {
 $bitmap = New-Object System.Drawing.Bitmap($w, $h)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, (New-Object System.Drawing.Size($w, $h)))
-$bitmap.Save('${escapedPath}', [System.Drawing.Imaging.ImageFormat]::Png)
+$bitmap.Save($env:AIDEX_SS_PATH, [System.Drawing.Imaging.ImageFormat]::Png)
 $graphics.Dispose()
 $bitmap.Dispose()
 `;
 }
 
-function windowByTitleScript(filePath: string, windowTitle: string): string {
-    const escapedPath = filePath.replace(/\\/g, '\\\\').replace(/'/g, "''");
-    const escapedTitle = windowTitle.replace(/'/g, "''");
-
+function windowByTitleScript(): string {
     return `
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -117,9 +124,10 @@ public class Win32Find {
 }
 "@
 
-$hwnd = [Win32Find]::FindByTitle('${escapedTitle}')
+$searchTitle = [string]$env:AIDEX_SS_TITLE
+$hwnd = [Win32Find]::FindByTitle($searchTitle)
 if ($hwnd -eq [IntPtr]::Zero) {
-    Write-Error "Window not found: ${escapedTitle}"
+    Write-Error ("Window not found: " + $searchTitle)
     exit 1
 }
 $rect = New-Object Win32Find+RECT
@@ -133,15 +141,13 @@ if ($w -le 0 -or $h -le 0) {
 $bitmap = New-Object System.Drawing.Bitmap($w, $h)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, (New-Object System.Drawing.Size($w, $h)))
-$bitmap.Save('${escapedPath}', [System.Drawing.Imaging.ImageFormat]::Png)
+$bitmap.Save($env:AIDEX_SS_PATH, [System.Drawing.Imaging.ImageFormat]::Png)
 $graphics.Dispose()
 $bitmap.Dispose()
 `;
 }
 
-function regionScript(filePath: string): string {
-    const escapedPath = filePath.replace(/\\/g, '\\\\').replace(/'/g, "''");
-
+function regionScript(): string {
     return `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -243,7 +249,7 @@ if (-not $script:cancelled -and $script:startPoint -and $script:currentPoint) {
     $h = [Math]::Abs($script:currentPoint.Y - $script:startPoint.Y)
     if ($w -gt 0 -and $h -gt 0) {
         $crop = $fullBitmap.Clone((New-Object System.Drawing.Rectangle($x, $y, $w, $h)), $fullBitmap.PixelFormat)
-        $crop.Save('${escapedPath}', [System.Drawing.Imaging.ImageFormat]::Png)
+        $crop.Save($env:AIDEX_SS_PATH, [System.Drawing.Imaging.ImageFormat]::Png)
         $crop.Dispose()
     } else {
         Write-Error "Selection too small"
@@ -259,16 +265,22 @@ $darkBitmap.Dispose()
 `;
 }
 
-function rectScript(filePath: string, x: number, y: number, width: number, height: number): string {
-    const escapedPath = filePath.replace(/\\/g, '\\\\').replace(/'/g, "''");
-
+function rectScript(): string {
     return `
 Add-Type -AssemblyName System.Drawing
 
-$bitmap = New-Object System.Drawing.Bitmap(${width}, ${height})
+$x = [int]$env:AIDEX_SS_X
+$y = [int]$env:AIDEX_SS_Y
+$w = [int]$env:AIDEX_SS_W
+$h = [int]$env:AIDEX_SS_H
+if ($w -le 0 -or $h -le 0) {
+    Write-Error "Invalid rectangle dimensions"
+    exit 1
+}
+$bitmap = New-Object System.Drawing.Bitmap($w, $h)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-$graphics.CopyFromScreen(${x}, ${y}, 0, 0, (New-Object System.Drawing.Size(${width}, ${height})))
-$bitmap.Save('${escapedPath}', [System.Drawing.Imaging.ImageFormat]::Png)
+$graphics.CopyFromScreen($x, $y, 0, 0, (New-Object System.Drawing.Size($w, $h)))
+$bitmap.Save($env:AIDEX_SS_PATH, [System.Drawing.Imaging.ImageFormat]::Png)
 $graphics.Dispose()
 $bitmap.Dispose()
 `;
@@ -288,23 +300,34 @@ Get-Process | Where-Object { $_.MainWindowTitle -ne '' } |
 
 export const win32Platform: PlatformScreenshot = {
     captureFullscreen(filePath: string, monitor?: number): void {
-        runPowerShell(fullscreenScript(filePath, monitor));
+        const env: Record<string, string> = { AIDEX_SS_PATH: filePath, AIDEX_SS_MONITOR: '' };
+        if (monitor !== undefined) env.AIDEX_SS_MONITOR = intEnv(monitor);
+        runPowerShell(fullscreenScript(), 30000, 'aidex', env);
     },
 
     captureActiveWindow(filePath: string): void {
-        runPowerShell(activeWindowScript(filePath));
+        runPowerShell(activeWindowScript(), 30000, 'aidex', { AIDEX_SS_PATH: filePath });
     },
 
     captureWindow(filePath: string, windowTitle: string): void {
-        runPowerShell(windowByTitleScript(filePath, windowTitle));
+        runPowerShell(windowByTitleScript(), 30000, 'aidex', {
+            AIDEX_SS_PATH: filePath,
+            AIDEX_SS_TITLE: windowTitle,
+        });
     },
 
     captureRegion(filePath: string): void {
-        runPowerShell(regionScript(filePath), 120000);
+        runPowerShell(regionScript(), 120000, 'aidex', { AIDEX_SS_PATH: filePath });
     },
 
     captureRect(filePath: string, x: number, y: number, width: number, height: number): void {
-        runPowerShell(rectScript(filePath, x, y, width, height));
+        runPowerShell(rectScript(), 30000, 'aidex', {
+            AIDEX_SS_PATH: filePath,
+            AIDEX_SS_X: intEnv(x),
+            AIDEX_SS_Y: intEnv(y),
+            AIDEX_SS_W: intEnv(width),
+            AIDEX_SS_H: intEnv(height),
+        });
     },
 
     listWindows(): WindowInfo[] {

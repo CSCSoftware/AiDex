@@ -1165,8 +1165,8 @@ Take a screenshot of the screen, a window, or an interactive region selection. R
 | `height` | number | for mode=rect | Height of the capture rectangle in pixels |
 | `monitor` | number | - | Monitor index (0-based, default: primary). Only for fullscreen mode |
 | `delay` | number | - | Seconds to wait before capturing (e.g., `3` to switch windows first) |
-| `filename` | string | - | Custom filename (default: `aidex-screenshot.png`). Overwrites if exists |
-| `save_path` | string | - | Custom directory (default: system temp directory) |
+| `filename` | string | - | Custom filename (default: `aidex-screenshot.png`). Overwrites if exists. Plain file name only (letters, digits, space, `_ - . ( )`, no path separators or `..`), extension `.png`/`.jpg`/`.jpeg` (`.png` is appended if missing) |
+| `save_path` | string | - | Custom directory (default: system temp directory). Must be an existing directory |
 
 **Capture Modes:**
 
@@ -1202,7 +1202,7 @@ Take a screenshot of the screen, a window, or an interactive region selection. R
 { "mode": "rect", "x": 100, "y": 200, "width": 800, "height": 600 }
 
 // Fullscreen with delay and custom path
-{ "delay": 3, "filename": "bug-report.png", "save_path": "/tmp/screenshots" }
+{ "delay": 3, "filename": "bug-report.png", "save_path": "/tmp" }
 
 // Second monitor
 { "monitor": 1 }
