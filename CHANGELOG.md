@@ -2,6 +2,20 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [2.4.1] - 2026-11-08
+
+Security release — please update. Fixes a command injection in `aidex_screenshot` (GHSA advisory published on GitHub).
+
+### Security
+
+- **`aidex_screenshot`: command injection on macOS fixed** (reported by Niklas Klutz, @nik-kl). The macOS backend built shell command strings for `screencapture`, `sips`, `rm` and `osascript` from the output path, so a crafted `filename` / `save_path` could run arbitrary shell commands. All tools are now started via `execFileSync` with argument arrays (no shell), the temp file is removed with `fs.unlinkSync`, and the window title is passed to AppleScript as a `run` handler argument instead of being spliced into the script source.
+- **Windows backend hardened the same way** — the PowerShell scripts no longer contain any user-supplied text. Output path, window title, monitor index, rectangle and scale are handed over as environment variables and read via `$env:…`, so quotes, `$(…)` subexpressions or Unicode quote characters in a window title can no longer escape. Side effect: paths with non-ASCII characters now work.
+- **Strict input validation** — `filename` must be a plain file name (no path separators, `..`, control characters; safe characters only) with a `.png`/`.jpg`/`.jpeg` extension; `save_path` is normalized and must be an existing directory (it is no longer created automatically); `mode`, `monitor`, `delay`, `x`/`y`/`width`/`height` and `scale` are checked for their real runtime type, since MCP arguments are untyped JSON.
+
+### Fixed
+
+- **`aidex_global_init`: nested CMake/Make/Meson sub-builds** inside a C/C++ project (vendored libraries like ggml with their own `CMakeLists.txt` in `examples/`, `tests/`, backend folders) are no longer registered as dozens of separate pseudo-projects.
+
 ## [2.4.0] - 2026-09-25
 
 Dashboard controls can now be pushed to your program instead of polled.

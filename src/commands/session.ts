@@ -90,10 +90,9 @@ const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
 // ============================================================
 
 const RELEASE_HIGHLIGHTS: string[] = [
-    'Control push: POST /control/subscribe lets a program with its own HTTP server receive dashboard changes instantly instead of polling GET /control',
-    'Push is additive: polling keeps working; dead subscribers are dropped after 3 failed deliveries; callbacks limited to the local network',
-    'aidex_log status now lists push subscribers',
-    'MCP-API-REFERENCE.md: new "Dashboard & Control API" section (panels, controls, button counters, push rules)',
+    'SECURITY: aidex_screenshot command injection fixed (macOS shell strings, Windows PowerShell interpolation) — thanks to Niklas Klutz (@nik-kl)',
+    'aidex_screenshot: filename must be a plain file name (.png/.jpg), save_path must be an existing directory',
+    'aidex_global_init: nested CMake/Make/Meson sub-builds are no longer registered as separate projects',
 ];
 
 // ============================================================
