@@ -92,6 +92,7 @@ const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
 const RELEASE_HIGHLIGHTS: string[] = [
     'NEW aidex_guideline: guidelines per project (the "project prompt"), stored in the project index',
     'Guidelines marked always=true are delivered in full by aidex_session (global and project) — no more "please read the guidelines" reminders; warning above 6000 characters',
+    'NEW aidex_health: read-only report on size, dead paths, dated lines and duplicates in the instructions an AI gets loaded',
 ];
 
 // ============================================================

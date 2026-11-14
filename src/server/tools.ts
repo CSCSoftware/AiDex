@@ -5,7 +5,7 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, projectGuideline, loadAlwaysGuidelines, ALWAYS_BUDGET, log, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction, type LogAction, type LogLevel } from '../commands/index.js';
+import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, projectGuideline, loadAlwaysGuidelines, ALWAYS_BUDGET, health, formatHealthReport, log, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction, type LogAction, type LogLevel } from '../commands/index.js';
 import type { TaskRow } from '../db/index.js';
 import { openDatabase } from '../db/index.js';
 import { startViewer, stopViewer } from '../viewer/index.js';
@@ -827,6 +827,20 @@ export function registerTools(): Tool[] {
             },
         },
         {
+            name: `${TOOL_PREFIX}health`,
+            description: `Read-only health report for the instructions an AI gets loaded: global guidelines, the global CLAUDE.md and, with a project path, the project's guidelines and instruction files (CLAUDE.md, .claude/CLAUDE.md, AGENTS.md, CLAUDE.local.md). Reports size of what is loaded into every session, dead paths, dated lines, duplicate lines, project-specific content in global text and long-untouched entries. Findings are hints; it never changes anything.`,
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    path: {
+                        type: 'string',
+                        description: `Project path (with ${INDEX_DIR}) to include its guidelines and instruction files. Omit to check only the global ones.`,
+                    },
+                },
+                required: [],
+            },
+        },
+        {
             name: `${TOOL_PREFIX}log`,
             description: `Universal Log Hub — receive and query logs from any external program (C#, Python, Node, etc.) via HTTP. Zero-cost when not used. Actions: init (start HTTP server), free (stop server), status (show stats), query (search logs), clear (reset buffer), write (inject entry as "claude"), control_get (read all interactive dashboard control values), control_set (change one control — same set-point the user's dashboard slider drives, so the AI can tune live).`,
             inputSchema: {
@@ -1066,6 +1080,11 @@ export async function handleToolCall(
 
             case `${TOOL_PREFIX}guideline`:
                 return handleProjectGuideline(args);
+
+            case `${TOOL_PREFIX}health`: {
+                const r = health({ path: args.path as string | undefined });
+                return { content: [{ type: 'text', text: r.success ? formatHealthReport(r) : `Error: ${r.error}` }] };
+            }
 
             case `${TOOL_PREFIX}log`:
                 return await handleLog(args);

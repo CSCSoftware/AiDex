@@ -11,6 +11,7 @@ Guidelines per project, and guidelines that arrive on their own.
 - **`aidex_guideline`** — named instructions for ONE project (key `main` by convention: the "project prompt"), stored in the project's `.aidex` index. Actions `set`, `get`, `list`, `delete`. Because they live in `.aidex`, they stay out of the repository unless that folder is committed.
 - **`always` flag** on `aidex_global_guideline` and `aidex_guideline` (`set` with `always: true`/`false`). **`aidex_session` now delivers the full text of all `always` guidelines** (global first, then project) under "Guidelines (binding)", so an AI no longer has to be told to read them. Other project guidelines are listed by key. `list` marks delivered guidelines with ★always.
 - **Size warning** — when the delivered texts together exceed 6000 characters, the session start says so. Keep them short.
+- **`aidex_health`** — read-only report on the instructions an AI gets loaded (global and project guidelines, global `CLAUDE.md`, the project's `CLAUDE.md` / `.claude/CLAUDE.md` / `AGENTS.md` / `CLAUDE.local.md`): what is loaded into every session and how big it is, paths that no longer exist, dated lines that have aged, duplicate lines across sources, global text that names a specific project, entries untouched for a year. Deterministic, no LLM, never changes anything — findings are hints, whether a rule is still needed is your call.
 
 ### Notes
 

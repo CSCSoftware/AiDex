@@ -42,6 +42,7 @@ Complete reference for all AiDex MCP tools.
   - [aidex_global_refresh](#aidex_global_refresh)
   - [aidex_global_guideline](#aidex_global_guideline)
   - [aidex_guideline](#aidex_guideline)
+  - [aidex_health](#aidex_health)
 - [Log Hub](#log-hub)
   - [aidex_log](#aidex_log)
   - [Dashboard & Control API](#dashboard--control-api)
@@ -1017,6 +1018,31 @@ Guidelines for ONE project (the "project prompt"; key `main` by convention). Sto
 ```
 
 **Returns:** For `get`/`set` — key, text, always mark. For `list` — keys with ★always mark and size. `aidex_session` prints a "Guidelines (binding)" block with the full text of all `always` guidelines (global first, then project) and warns when their total exceeds 6000 characters.
+
+---
+
+### aidex_health
+
+Read-only health report for the instructions an AI gets loaded. Deterministic, no LLM; it never changes anything and its findings are hints.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `path` | string | No | Project path containing `.aidex`. Adds the project's guidelines and instruction files (`CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`). Omit to check only global guidelines and `~/.claude/CLAUDE.md` |
+
+**Checks:**
+
+| Check | Reports |
+|-------|---------|
+| `size` | A source loaded into every session (always-guideline or instruction file) over 4000 characters; the summary shows the total and the always-guideline budget (6000) |
+| `dead-path` | Windows paths in the text that do not exist (skipped: offline drives, placeholders such as `%VAR%`, `...`, URLs) |
+| `dated` | Lines with a date older than 90 days and a time word ("as of", "until", "Stand", "ab", ...) |
+| `duplicate` | Identical or near-identical lines (word overlap 80 %) in different sources |
+| `scope` | Global, always-loaded text that names a registered project (name of 6+ characters) |
+| `untouched` | Guidelines not changed for a year |
+
+**Returns:** Markdown report: loaded sources with sizes, warnings (`size`, `dead-path`, `duplicate`), hints (`dated`, `scope`, `untouched`).
 
 ---
 
