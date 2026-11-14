@@ -2,6 +2,20 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [2.5.0] - 2026-11-14
+
+Guidelines per project, and guidelines that arrive on their own.
+
+### Added
+
+- **`aidex_guideline`** — named instructions for ONE project (key `main` by convention: the "project prompt"), stored in the project's `.aidex` index. Actions `set`, `get`, `list`, `delete`. Because they live in `.aidex`, they stay out of the repository unless that folder is committed.
+- **`always` flag** on `aidex_global_guideline` and `aidex_guideline` (`set` with `always: true`/`false`). **`aidex_session` now delivers the full text of all `always` guidelines** (global first, then project) under "Guidelines (binding)", so an AI no longer has to be told to read them. Other project guidelines are listed by key. `list` marks delivered guidelines with ★always.
+- **Size warning** — when the delivered texts together exceed 6000 characters, the session start says so. Keep them short.
+
+### Notes
+
+- No schema change: project guidelines are metadata entries (`guideline:<key>`), the list of `always` keys is a metadata entry (`guidelines_always`) in the project index and in `~/.aidex/global.db`. Existing guidelines are untouched and not "always" until marked.
+
 ## [2.4.1] - 2026-11-08
 
 Security release — please update. Fixes a command injection in `aidex_screenshot` (GHSA advisory published on GitHub).

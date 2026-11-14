@@ -41,6 +41,7 @@ Complete reference for all AiDex MCP tools.
   - [aidex_global_signatures](#aidex_global_signatures)
   - [aidex_global_refresh](#aidex_global_refresh)
   - [aidex_global_guideline](#aidex_global_guideline)
+  - [aidex_guideline](#aidex_guideline)
 - [Log Hub](#log-hub)
   - [aidex_log](#aidex_log)
   - [Dashboard & Control API](#dashboard--control-api)
@@ -976,10 +977,12 @@ Store, retrieve, list, or delete persistent AI guidelines and coding conventions
 | `key` | string | for set/get/delete | Guideline name (e.g., `"review"`, `"style"`, `"release"`) |
 | `value` | string | for set | The guideline content to store |
 | `filter` | string | No | Substring filter for `list` action |
+| `always` | boolean | No | `set` only: `true` marks the guideline "always" — `aidex_session` delivers its full text at the start of every session; `false` removes the mark. Omitted keeps the current mark |
 
 **Examples:**
 ```json
 { "action": "set", "key": "review", "value": "Check: error handling, null safety, no magic strings, consistent naming" }
+{ "action": "set", "key": "rules", "value": "Never commit unasked.", "always": true }
 { "action": "set", "key": "style", "value": "PascalCase classes, camelCase methods, 4-space indent, XML docs on public APIs" }
 { "action": "get", "key": "review" }
 { "action": "list" }
@@ -987,7 +990,33 @@ Store, retrieve, list, or delete persistent AI guidelines and coding conventions
 { "action": "delete", "key": "old-rule" }
 ```
 
-**Returns:** For `get` — key, value, created/updated timestamps. For `list` — all matching guidelines. For `set`/`delete` — confirmation message.
+**Returns:** For `get` — key, value, created/updated timestamps. For `list` — all matching guidelines (★always marks the delivered ones). For `set`/`delete` — confirmation message.
+
+---
+
+### aidex_guideline
+
+Guidelines for ONE project (the "project prompt"; key `main` by convention). Stored in the project's `.aidex` index, so they need an indexed project and stay out of the repository unless `.aidex` is committed. Guidelines marked `always` are delivered in full by `aidex_session`; other project guidelines are listed there by key. Global rules: `aidex_global_guideline`.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `path` | string | Yes | Project path containing `.aidex` |
+| `action` | string | Yes | `set`, `get`, `list`, or `delete` |
+| `key` | string | for set/get/delete | Guideline name, e.g. `"main"` |
+| `value` | string | for set | The guideline text |
+| `always` | boolean | No | `set` only: `true` = delivered at session start, `false` = remove the mark, omitted = keep |
+
+**Examples:**
+```json
+{ "path": "/my/project", "action": "set", "key": "main", "value": "Docs live in docs/; run tests before reporting.", "always": true }
+{ "path": "/my/project", "action": "list" }
+{ "path": "/my/project", "action": "get", "key": "deploy" }
+{ "path": "/my/project", "action": "delete", "key": "old" }
+```
+
+**Returns:** For `get`/`set` — key, text, always mark. For `list` — keys with ★always mark and size. `aidex_session` prints a "Guidelines (binding)" block with the full text of all `always` guidelines (global first, then project) and warns when their total exceeds 6000 characters.
 
 ---
 

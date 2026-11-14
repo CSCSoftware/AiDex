@@ -166,39 +166,43 @@ export const DEFAULT_EXCLUDE = [
 // .gitignore support
 // ============================================================
 
-export function readGitignore(projectPath: string): string[] {
-    const gitignorePath = join(projectPath, '.gitignore');
-    if (!existsSync(gitignorePath)) return [];
+/**
+ * One .gitignore line → glob(s). A leading '/' anchors the pattern at the project root
+ * (`/claude/` must not exclude `src/bridges/claude/`).
+ */
+export function gitignoreToGlobs(pattern: string): string[] {
+    if (pattern.startsWith('/')) {
+        const p = pattern.replace(/^\/+/, '');
+        if (!p) return [];
+        if (p.endsWith('/')) return [`${p}**`];   // /foo/ → foo/**
+        return [p, `${p}/**`];                     // /foo  → foo, foo/**
+    }
+    if (pattern.endsWith('/')) {
+        return [`**/${pattern}**`];               // Verzeichnis: foo/ → **/foo/**
+    }
+    if (!pattern.includes('/') && !pattern.startsWith('*')) {
+        return [`**/${pattern}`];                 // Datei/Ordner: foo → **/foo
+    }
+    return [pattern];
+}
 
-    const content = readFileSync(gitignorePath, 'utf-8');
+function parseIgnoreLines(content: string): string[] {
     return content
         .split('\n')
         .map(line => line.trim())
         .filter(line => line && !line.startsWith('#') && !line.startsWith('!'))  // Skip comments, empty lines, and negation patterns
-        .map(pattern => {
-            // Glob-kompatibel machen
-            if (pattern.endsWith('/')) {
-                return `**/${pattern}**`;  // Verzeichnis: foo/ → **/foo/**
-            }
-            if (!pattern.includes('/') && !pattern.startsWith('*')) {
-                return `**/${pattern}`;    // Datei/Ordner: foo → **/foo
-            }
-            return pattern;
-        });
+        .flatMap(gitignoreToGlobs);
+}
+
+export function readGitignore(projectPath: string): string[] {
+    const gitignorePath = join(projectPath, '.gitignore');
+    if (!existsSync(gitignorePath)) return [];
+    return parseIgnoreLines(readFileSync(gitignorePath, 'utf-8'));
 }
 
 function parseIgnoreFile(filePath: string): string[] {
     if (!existsSync(filePath)) return [];
-    const content = readFileSync(filePath, 'utf-8');
-    return content
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => line && !line.startsWith('#') && !line.startsWith('!'))
-        .map(pattern => {
-            if (pattern.endsWith('/')) return `**/${pattern}**`;
-            if (!pattern.includes('/') && !pattern.startsWith('*')) return `**/${pattern}`;
-            return pattern;
-        });
+    return parseIgnoreLines(readFileSync(filePath, 'utf-8'));
 }
 
 // Binary/asset extensions always excluded from embeddings

@@ -7,6 +7,6 @@ export { globalStatus, type GlobalStatusParams, type GlobalStatusResult, type Gl
 export { globalQuery, invalidateGlobalCache, type GlobalQueryParams, type GlobalQueryResult, type GlobalQueryProjectResult, type GlobalQueryMatch, type GlobalQueryMode } from './global-query.js';
 export { globalSignatures, type GlobalSignaturesParams, type GlobalSignaturesResult, type GlobalSignaturesProjectResult, type GlobalMethodMatch, type GlobalTypeMatch, type SignatureKind } from './global-signatures.js';
 export { globalRefresh, type GlobalRefreshParams, type GlobalRefreshResult } from './global-refresh.js';
-export { globalGuideline, type GlobalGuidelineParams, type GlobalGuidelineResult, type GuidelineAction } from './global-guideline.js';
+export { globalGuideline, getGlobalAlwaysKeys, type GlobalGuidelineParams, type GlobalGuidelineResult, type GuidelineAction } from './global-guideline.js';
 export { checkScheduledTasks, type SchedulerResult, type DueTask } from './global-scheduler.js';
 export { parseDueDate, parseIntervalToMs } from '../shared.js';

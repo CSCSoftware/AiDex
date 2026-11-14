@@ -107,6 +107,7 @@ Do I want to search code?
 | "All indexed projects?" | \`aidex_global_status\` |
 | "Store coding convention" | \`aidex_global_guideline action="set"\` |
 | "Load review checklist" | \`aidex_global_guideline action="get"\` |
+| "Rules for this project" | \`aidex_guideline path="..." action="set" always=true\` (delivered by \`aidex_session\`) |
 | "Debug my app — see logs" | \`aidex_log action="init"\` + \`aidex_viewer\` |
 
 ### Search Modes
@@ -115,7 +116,7 @@ Do I want to search code?
 - **\`contains\`**: Finds identifiers containing the term — \`render\` matches \`preRenderSetup\`
 - **\`starts_with\`**: Finds identifiers starting with the term — \`Update\` matches \`UpdatePlayer\`, \`UpdateUI\`
 
-### All Tools (30)
+### All Tools (31)
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
@@ -124,7 +125,7 @@ Do I want to search code?
 | Overview | \`aidex_summary\`, \`aidex_tree\`, \`aidex_describe\`, \`aidex_files\` | Entry points, file tree, file listing by type |
 | Cross-Project | \`aidex_link\`, \`aidex_unlink\`, \`aidex_links\`, \`aidex_scan\` | Link dependencies, discover projects |
 | Global Search | \`aidex_global_init\`, \`aidex_global_query\`, \`aidex_global_signatures\`, \`aidex_global_status\`, \`aidex_global_refresh\` | Search across ALL projects |
-| Guidelines | \`aidex_global_guideline\` | Persistent AI instructions & conventions (key-value, global) |
+| Guidelines | \`aidex_global_guideline\`, \`aidex_guideline\` | Persistent AI instructions & conventions (key-value, global and per project) |
 | Sessions | \`aidex_session\`, \`aidex_note\` | Track sessions, leave notes (with searchable history & summaries) |
 | Tasks | \`aidex_task\`, \`aidex_tasks\` | Built-in backlog with priorities, tags, summaries, auto-logged history |
 | Log Hub | \`aidex_log\` | Universal log receiver — any program sends logs via HTTP, AI queries them, live in Viewer |

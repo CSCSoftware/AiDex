@@ -43,7 +43,7 @@ AiDex is an MCP server that gives AI coding assistants a memory, semantic search
 | **Project Overview** | `summary`, `tree`, `describe`, `files` | Entry points, language breakdown, file tree with stats, file listing by type |
 | **Cross-Project** | `link`, `unlink`, `links`, `scan` | Link dependencies, discover indexed projects |
 | **Global Search** | `global_init`, `global_query`, `global_signatures`, `global_status`, `global_refresh` | Search identifiers across ALL your projects — "Have I ever written X?" |
-| **Guidelines** | `global_guideline` | Persistent AI instructions & coding conventions — shared across all projects |
+| **Guidelines** | `global_guideline`, `guideline` | Persistent AI instructions & coding conventions — global and per project, optionally delivered automatically at session start |
 | **Sessions** | `session`, `note` | Track sessions, detect external changes, leave notes for next session (with searchable history) |
 | **Task Backlog** | `task`, `tasks` | Built-in task management with priorities, tags, auto-logged history, and **scheduled/recurring tasks** |
 | **Log Hub** | `log` | Universal log receiver — any program sends logs via HTTP, queryable by the AI, live in Viewer |
@@ -377,7 +377,7 @@ Do I want to search code?
 - **`contains`**: Finds identifiers containing the term — `render` matches `preRenderSetup`
 - **`starts_with`**: Finds identifiers starting with the term — `Update` matches `UpdatePlayer`, `UpdateUI`
 
-### All Tools (30)
+### All Tools (31)
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
@@ -386,7 +386,7 @@ Do I want to search code?
 | Overview | `aidex_summary`, `aidex_tree`, `aidex_describe`, `aidex_files` | Entry points, file tree, file listing by type |
 | Cross-Project | `aidex_link`, `aidex_unlink`, `aidex_links`, `aidex_scan` | Link dependencies, discover projects |
 | Global Search | `aidex_global_init`, `aidex_global_query`, `aidex_global_signatures`, `aidex_global_status`, `aidex_global_refresh` | Search across ALL projects |
-| Guidelines | `aidex_global_guideline` | Persistent AI instructions & conventions (key-value, global) |
+| Guidelines | `aidex_global_guideline`, `aidex_guideline` | Persistent AI instructions & conventions (key-value, global and per project) |
 | Sessions | `aidex_session`, `aidex_note` | Track sessions, leave notes (with searchable history) |
 | Tasks | `aidex_task`, `aidex_tasks` | Built-in backlog with priorities, tags, summaries, auto-logged history, scheduled/recurring tasks |
 | Log Hub | `aidex_log` | Universal log receiver — any program sends logs via HTTP, AI queries them, live in Viewer |
@@ -492,6 +492,7 @@ aidex_init({ path: "/path/to/your/project" })
 | `aidex_global_signatures` | Search methods/types by name across all projects |
 | `aidex_global_refresh` | Update stats and remove stale projects from global DB |
 | `aidex_global_guideline` | Store/retrieve AI guidelines and coding conventions (key-value, global) |
+| `aidex_guideline` | Same for ONE project (stored in its `.aidex` index); `always=true` guidelines are delivered by `aidex_session` |
 | `aidex_log` | Universal log receiver — start HTTP server, query logs, live stream in Viewer |
 
 ## Time-based Filtering
@@ -662,6 +663,18 @@ aidex_global_guideline({ action: "delete", key: "old-rule" })          # Remove 
 - **Project-agnostic instructions**: No more pasting the same context into every session
 
 Guidelines are stored in `~/.aidex/global.db` — available across all your projects without `aidex_init`. Ask your AI: *"Load the review guideline and apply it to this file."*
+
+### Project guidelines and automatic delivery
+
+Rules that belong to one project go into that project's `.aidex` index (the "project prompt" — key `main` by convention). Mark a guideline `always` and `aidex_session` delivers its full text when the session starts, so nobody has to remember to read it. This works for global and project guidelines alike. Everything else is only listed by key.
+
+```
+aidex_global_guideline({ action: "set", key: "rules", value: "...", always: true })              # global, delivered at every session start
+aidex_guideline({ path: "/my/project", action: "set", key: "main", value: "...", always: true }) # this project only
+aidex_guideline({ path: "/my/project", action: "list" })                                        # keys, ★always marks, sizes
+```
+
+Keep "always" guidelines short: the session start warns when their total exceeds 6000 characters. Project guidelines live in `.aidex`, so they stay out of the repository unless you commit that folder.
 
 ## Log Hub — Universal Logging
 

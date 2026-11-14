@@ -140,6 +140,16 @@ export class AiDexDatabase {
     }
 
     /**
+     * List metadata entries whose key starts with a prefix (ordered by key)
+     */
+    listMetadata(prefix: string): Array<{ key: string; value: string | null }> {
+        const escaped = prefix.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+        return this.db.prepare(
+            "SELECT key, value FROM metadata WHERE key LIKE ? ESCAPE '\\' ORDER BY key"
+        ).all(`${escaped}%`) as Array<{ key: string; value: string | null }>;
+    }
+
+    /**
      * Delete metadata entry
      */
     deleteMetadata(key: string): void {

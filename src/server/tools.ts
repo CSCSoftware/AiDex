@@ -5,7 +5,7 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, log, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction, type LogAction, type LogLevel } from '../commands/index.js';
+import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, projectGuideline, loadAlwaysGuidelines, ALWAYS_BUDGET, log, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction, type LogAction, type LogLevel } from '../commands/index.js';
 import type { TaskRow } from '../db/index.js';
 import { openDatabase } from '../db/index.js';
 import { startViewer, stopViewer } from '../viewer/index.js';
@@ -787,8 +787,43 @@ export function registerTools(): Tool[] {
                         type: 'string',
                         description: 'Substring filter for keys when listing (optional)',
                     },
+                    always: {
+                        type: 'boolean',
+                        description: 'set only: true = the session start delivers this guideline in full text (keep these few and short), false = remove that mark',
+                    },
                 },
                 required: ['action'],
+            },
+        },
+        {
+            name: `${TOOL_PREFIX}guideline`,
+            description: `Project guidelines: named instructions that apply to ONE project, stored in its ${INDEX_DIR} index (the project prompt; key "main" is the usual one). Mark a guideline always=true and ${TOOL_PREFIX}session delivers its full text at the start. Other guidelines are listed by key only. Global rules: ${TOOL_PREFIX}global_guideline.`,
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    path: {
+                        type: 'string',
+                        description: `Path to project with ${INDEX_DIR} directory`,
+                    },
+                    action: {
+                        type: 'string',
+                        enum: ['set', 'get', 'list', 'delete'],
+                        description: 'set: create/overwrite | get: read one | list: all keys | delete: remove',
+                    },
+                    key: {
+                        type: 'string',
+                        description: 'Guideline key (required for set, get, delete), e.g. "main"',
+                    },
+                    value: {
+                        type: 'string',
+                        description: 'Guideline text (required for set)',
+                    },
+                    always: {
+                        type: 'boolean',
+                        description: 'set only: true = delivered in full at session start, false = remove that mark',
+                    },
+                },
+                required: ['path', 'action'],
             },
         },
         {
@@ -1028,6 +1063,9 @@ export async function handleToolCall(
 
             case `${TOOL_PREFIX}global_guideline`:
                 return handleGlobalGuideline(args);
+
+            case `${TOOL_PREFIX}guideline`:
+                return handleProjectGuideline(args);
 
             case `${TOOL_PREFIX}log`:
                 return await handleLog(args);
@@ -1990,6 +2028,20 @@ function handleSession(args: Record<string, unknown>): { content: Array<{ type: 
         message += '▶️ **Session Continued**\n\n';
     }
 
+    // Guidelines marked "always": delivered in full, binding for this session.
+    const always = loadAlwaysGuidelines(path);
+    if (always.global.length + always.project.length > 0) {
+        message += '## 📌 Guidelines (binding)\n\n';
+        for (const g of always.global) message += `### ${g.key} (global)\n${g.value}\n\n`;
+        for (const g of always.project) message += `### ${g.key} (project)\n${g.value}\n\n`;
+        if (always.chars > ALWAYS_BUDGET) {
+            message += `⚠️ These guidelines are ${always.chars} characters (budget ${ALWAYS_BUDGET}). Shorten them or unmark some with always=false.\n\n`;
+        }
+    }
+    if (always.otherProjectKeys.length > 0) {
+        message += `More project guidelines (read with ${TOOL_PREFIX}guideline get): ${always.otherProjectKeys.join(', ')}\n\n`;
+    }
+
     // Last session info
     if (result.sessionInfo.lastSessionStart && result.sessionInfo.lastSessionEnd) {
         message += '## Last Session\n';
@@ -2662,11 +2714,13 @@ function handleGlobalGuideline(args: Record<string, unknown>): { content: Array<
         key: args.key as string | undefined,
         value: args.value as string | undefined,
         filter: args.filter as string | undefined,
+        always: args.always as boolean | undefined,
     });
 
     if (!result.success) {
         return { content: [{ type: 'text', text: `Error: ${result.error}` }] };
     }
+    const alwaysSet = new Set(result.alwaysKeys ?? []);
 
     switch (result.action) {
         case 'set':
@@ -2674,7 +2728,7 @@ function handleGlobalGuideline(args: Record<string, unknown>): { content: Array<
             const g = result.guideline!;
             const updated = new Date(g.updated_at).toLocaleString();
             const created = new Date(g.created_at).toLocaleString();
-            let msg = `# Guideline: ${g.key}\n\n${g.value}\n\n`;
+            let msg = `# Guideline: ${g.key}${alwaysSet.has(g.key) ? ' (always)' : ''}\n\n${g.value}\n\n`;
             msg += `*Created: ${created} | Updated: ${updated}*`;
             return { content: [{ type: 'text', text: msg }] };
         }
@@ -2691,7 +2745,7 @@ function handleGlobalGuideline(args: Record<string, unknown>): { content: Array<
             for (const g of rows) {
                 const summary = summarizeGuideline(g.key, g.value);
                 const updated = new Date(g.updated_at).toLocaleDateString();
-                msg += `- **${g.key}** — ${summary}  _(updated ${updated})_\n`;
+                msg += `- **${g.key}**${alwaysSet.has(g.key) ? ' ★always' : ''} — ${summary}  _(updated ${updated})_\n`;
             }
             return { content: [{ type: 'text', text: msg.trimEnd() }] };
         }
@@ -2705,6 +2759,47 @@ function handleGlobalGuideline(args: Record<string, unknown>): { content: Array<
                         : `Guideline "${args.key}" not found.`,
                 }],
             };
+    }
+}
+
+/**
+ * Handle project guideline (stored in the project's index)
+ */
+function handleProjectGuideline(args: Record<string, unknown>): { content: Array<{ type: string; text: string }> } {
+    const path = args.path as string;
+    const action = args.action as string;
+    if (!path) return { content: [{ type: 'text', text: 'Error: path parameter is required' }] };
+    if (!action) return { content: [{ type: 'text', text: 'Error: action parameter is required' }] };
+
+    const result = projectGuideline({
+        path,
+        action: action as GuidelineAction,
+        key: args.key as string | undefined,
+        value: args.value as string | undefined,
+        always: args.always as boolean | undefined,
+    });
+
+    if (!result.success) {
+        return { content: [{ type: 'text', text: `Error: ${result.error}` }] };
+    }
+
+    switch (result.action) {
+        case 'set':
+        case 'get': {
+            const g = result.guideline!;
+            return { content: [{ type: 'text', text: `# Project guideline: ${g.key}${g.always ? ' (always)' : ''}\n\n${g.value}` }] };
+        }
+        case 'list': {
+            const rows = result.guidelines!;
+            if (rows.length === 0) return { content: [{ type: 'text', text: 'No project guidelines.' }] };
+            let msg = `# Project guidelines (${rows.length})\n\n`;
+            for (const g of rows) {
+                msg += `- **${g.key}**${g.always ? ' ★always' : ''} — ${summarizeGuideline(g.key, g.value)} (${g.value.length} chars)\n`;
+            }
+            return { content: [{ type: 'text', text: msg.trimEnd() }] };
+        }
+        case 'delete':
+            return { content: [{ type: 'text', text: result.deleted ? `Project guideline "${args.key}" deleted.` : `Project guideline "${args.key}" not found.` }] };
     }
 }
 

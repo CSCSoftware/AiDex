@@ -90,9 +90,8 @@ const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
 // ============================================================
 
 const RELEASE_HIGHLIGHTS: string[] = [
-    'SECURITY: aidex_screenshot command injection fixed (macOS shell strings, Windows PowerShell interpolation) — thanks to Niklas Klutz (@nik-kl)',
-    'aidex_screenshot: filename must be a plain file name (.png/.jpg), save_path must be an existing directory',
-    'aidex_global_init: nested CMake/Make/Meson sub-builds are no longer registered as separate projects',
+    'NEW aidex_guideline: guidelines per project (the "project prompt"), stored in the project index',
+    'Guidelines marked always=true are delivered in full by aidex_session (global and project) — no more "please read the guidelines" reminders; warning above 6000 characters',
 ];
 
 // ============================================================
