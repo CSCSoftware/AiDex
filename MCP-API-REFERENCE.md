@@ -1003,8 +1003,8 @@ Guidelines for ONE project (the "project prompt"; key `main` by convention). Sto
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `path` | string | Yes | Project path containing `.aidex` |
-| `action` | string | Yes | `set`, `get`, `list`, or `delete` |
+| `path` | string | Yes (optional for `binding`) | Project path containing `.aidex` |
+| `action` | string | Yes | `set`, `get`, `list`, `delete`, or `binding` |
 | `key` | string | for set/get/delete | Guideline name, e.g. `"main"` |
 | `value` | string | for set | The guideline text |
 | `always` | boolean | No | `set` only: `true` = delivered at session start, `false` = remove the mark, omitted = keep |
@@ -1015,7 +1015,10 @@ Guidelines for ONE project (the "project prompt"; key `main` by convention). Sto
 { "path": "/my/project", "action": "list" }
 { "path": "/my/project", "action": "get", "key": "deploy" }
 { "path": "/my/project", "action": "delete", "key": "old" }
+{ "path": "/my/project", "action": "binding" }
 ```
+
+**`binding`:** returns the same "Guidelines (binding)" block `aidex_session` prints (global, parent projects, project), read-only and without session side effects. Without `path` only the global ones. Meant for clients that put the rules into a system prompt themselves, e.g. for sub-agents that never call `aidex_session`.
 
 **Inheritance:** a project below another indexed project also receives that parent's `always` guidelines at session start (outermost first, labelled "parent project <folder>"). `list` and `get` show only the project's own guidelines.
 
@@ -1043,6 +1046,7 @@ Read-only health report for the instructions an AI gets loaded. Deterministic, n
 | `duplicate` | Identical or near-identical lines (word overlap 80 %) in different sources |
 | `scope` | Global, always-loaded text that names a registered project (name of 6+ characters) |
 | `untouched` | Guidelines not changed for a year |
+| `size` (note) | The project's session note over 8000 characters — it is loaded at every session start |
 
 **Returns:** Markdown report: loaded sources with sizes, warnings (`size`, `dead-path`, `duplicate`), hints (`dated`, `scope`, `untouched`).
 

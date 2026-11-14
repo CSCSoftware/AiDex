@@ -102,7 +102,7 @@ export interface AlwaysGuidelines {
 }
 
 /** Collect the guidelines the session start delivers in full. Never throws. */
-export function loadAlwaysGuidelines(projectPath: string): AlwaysGuidelines {
+export function loadAlwaysGuidelines(projectPath?: string): AlwaysGuidelines {
     const out: AlwaysGuidelines = { global: [], project: [], otherProjectKeys: [], chars: 0 };
 
     try {
@@ -120,6 +120,11 @@ export function loadAlwaysGuidelines(projectPath: string): AlwaysGuidelines {
         }
     } catch {
         // global.db missing or unreadable: no global guidelines
+    }
+
+    if (!projectPath) {
+        out.chars = out.global.reduce((n, g) => n + g.value.length, 0);
+        return out;
     }
 
     // Parent projects first (outermost to innermost): a project inside another indexed project
@@ -143,4 +148,19 @@ export function loadAlwaysGuidelines(projectPath: string): AlwaysGuidelines {
 
     out.chars = [...out.global, ...out.project].reduce((n, g) => n + g.value.length, 0);
     return out;
+}
+
+/**
+ * The binding block as delivered at session start: full text of all "always" guidelines
+ * (global, parent projects, project) plus the budget warning. Empty string when there are none.
+ */
+export function formatAlwaysGuidelines(always: AlwaysGuidelines, heading = '## 📌 Guidelines (binding)'): string {
+    if (always.global.length + always.project.length === 0) return '';
+    let msg = `${heading}\n\n`;
+    for (const g of always.global) msg += `### ${g.key} (global)\n${g.value}\n\n`;
+    for (const g of always.project) msg += `### ${g.key} (${g.from ? `parent project ${g.from}` : 'project'})\n${g.value}\n\n`;
+    if (always.chars > ALWAYS_BUDGET) {
+        msg += `⚠️ These guidelines are ${always.chars} characters (budget ${ALWAYS_BUDGET}). Shorten them or unmark some with always=false.\n\n`;
+    }
+    return msg;
 }

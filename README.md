@@ -673,6 +673,7 @@ Rules that belong to one project go into that project's `.aidex` index (the "pro
 aidex_global_guideline({ action: "set", key: "rules", value: "...", always: true })              # global, delivered at every session start
 aidex_guideline({ path: "/my/project", action: "set", key: "main", value: "...", always: true }) # this project only
 aidex_guideline({ path: "/my/project", action: "list" })                                        # keys, ★always marks, sizes
+aidex_guideline({ path: "/my/project", action: "binding" })                                     # just the binding rules, e.g. for a system prompt
 ```
 
 A project inside another indexed project (for example `Synthesizers/Sygala/Orbion` below `Synthesizers`) also gets the `always` guidelines of its parent projects, outermost first, labelled "parent project ...". Put a rule that holds for a whole family of projects into the parent once.
@@ -681,7 +682,7 @@ Keep "always" guidelines short: the session start warns when their total exceeds
 
 ### Health report
 
-Guidelines and instruction files grow, and old hints outlive the reason they were written. `aidex_health({ path })` reads global guidelines, the global `CLAUDE.md` and the project's guidelines and instruction files (`CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`) and reports: what is loaded into every session and how big it is, paths that no longer exist, dated lines ("as of ...", "until ...") that have aged, duplicate lines across sources, global text that names a specific project, and entries untouched for a year. It is read-only and has no AI in it; the findings are hints. Whether a rule is still needed stays your call.
+Guidelines and instruction files grow, and old hints outlive the reason they were written. `aidex_health({ path })` reads global guidelines, the global `CLAUDE.md` and the project's guidelines and instruction files (`CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`) and reports: what is loaded into every session and how big it is, paths that no longer exist, dated lines ("as of ...", "until ...") that have aged, duplicate lines across sources, global text that names a specific project, entries untouched for a year, and a session note that has grown too big. It is read-only and has no AI in it; the findings are hints. Whether a rule is still needed stays your call.
 
 ## Log Hub — Universal Logging
 

@@ -13,7 +13,8 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { openGlobalDatabase } from '../db/global-database.js';
 import { getGlobalAlwaysKeys } from './global/global-guideline.js';
-import { projectGuideline, ALWAYS_BUDGET } from './guidelines.js';
+import { projectGuideline, loadAlwaysGuidelines, ALWAYS_BUDGET } from './guidelines.js';
+import { withProjectDb } from './shared.js';
 
 // ============================================================
 // Types
@@ -54,6 +55,7 @@ export interface HealthResult {
 }
 
 const BIG_SOURCE = 4000;
+const BIG_NOTE = 8000;
 const DAY = 24 * 60 * 60 * 1000;
 const DATED_AFTER_DAYS = 90;
 const UNTOUCHED_AFTER_DAYS = 365;
@@ -236,10 +238,19 @@ export function health(params: { path?: string }): HealthResult {
             for (const g of res.guidelines ?? []) {
                 sources.push({ id: `p:${g.key}`, label: `project guideline "${g.key}"`, loaded: g.always, global: false, text: g.value });
             }
+            for (const g of loadAlwaysGuidelines(params.path).project.filter(p => p.from)) {
+                sources.push({ id: `p:${g.from}:${g.key}`, label: `parent project ${g.from} guideline "${g.key}"`, loaded: true, global: false, text: g.value });
+            }
             for (const name of INSTRUCTION_FILES) {
                 const text = readText(join(params.path, name));
                 if (text) sources.push({ id: `f:${name}`, label: name.replace(/\\/g, '/'), loaded: true, global: false, text });
             }
+        }
+
+        // The session note is loaded at every session start too
+        let noteChars = 0;
+        if (params.path) {
+            noteChars = withProjectDb(params.path, true, () => 0, (db) => (db.getMetadata('session_note') ?? '').length);
         }
 
         const findings = analyzeSources(sources, {
@@ -248,6 +259,9 @@ export function health(params: { path?: string }): HealthResult {
             pathExists: existsSync,
             driveExists: (d) => existsSync(d + '\\') || existsSync(d + '/'),
         });
+        if (noteChars > BIG_NOTE) {
+            findings.unshift({ severity: 'warn', check: 'size', source: 'session note', message: `${noteChars} characters, loaded at every session start (over ${BIG_NOTE}). Keep the current state and next step, archive the rest (aidex_note history keeps old notes).` });
+        }
 
         const guidelineAlways = sources.filter(s => s.loaded && (s.id.startsWith('g:') || s.id.startsWith('p:')));
         const files = sources.filter(s => s.id.startsWith('f:'));

@@ -8,7 +8,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import Database from 'better-sqlite3';
 
-import { projectGuideline, loadAlwaysGuidelines, ALWAYS_BUDGET } from '../build/commands/guidelines.js';
+import { projectGuideline, loadAlwaysGuidelines, formatAlwaysGuidelines, ALWAYS_BUDGET } from '../build/commands/guidelines.js';
 
 function createTempProject() {
     const dir = mkdtempSync(join(tmpdir(), 'aidex-guideline-test-'));
@@ -78,6 +78,19 @@ describe('project guidelines', () => {
         expect(a.project[0].from).toBeDefined();
         expect(a.project[1].from).toBeUndefined();
         expect(a.otherProjectKeys).toEqual([]);
+    });
+
+    test('formatAlwaysGuidelines: binding block with labels, empty without guidelines', () => {
+        expect(formatAlwaysGuidelines({ global: [], project: [], otherProjectKeys: [], chars: 0 })).toBe('');
+        const text = formatAlwaysGuidelines({
+            global: [{ key: 'rules', value: 'G' }],
+            project: [{ key: 'main', value: 'P', from: 'Parent' }, { key: 'main', value: 'C' }],
+            otherProjectKeys: [], chars: 3,
+        });
+        expect(text).toContain('### rules (global)\nG');
+        expect(text).toContain('### main (parent project Parent)\nP');
+        expect(text).toContain('### main (project)\nC');
+        expect(loadAlwaysGuidelines(undefined).project).toEqual([]);
     });
 
     test('loadAlwaysGuidelines delivers project "always" texts, other keys by name', () => {

@@ -5,7 +5,7 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, projectGuideline, loadAlwaysGuidelines, ALWAYS_BUDGET, health, formatHealthReport, log, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction, type LogAction, type LogLevel } from '../commands/index.js';
+import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, projectGuideline, loadAlwaysGuidelines, formatAlwaysGuidelines, health, formatHealthReport, log, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction, type LogAction, type LogLevel } from '../commands/index.js';
 import type { TaskRow } from '../db/index.js';
 import { openDatabase } from '../db/index.js';
 import { startViewer, stopViewer } from '../viewer/index.js';
@@ -803,12 +803,12 @@ export function registerTools(): Tool[] {
                 properties: {
                     path: {
                         type: 'string',
-                        description: `Path to project with ${INDEX_DIR} directory`,
+                        description: `Path to project with ${INDEX_DIR} directory (optional for binding)`,
                     },
                     action: {
                         type: 'string',
-                        enum: ['set', 'get', 'list', 'delete'],
-                        description: 'set: create/overwrite | get: read one | list: all keys | delete: remove',
+                        enum: ['set', 'get', 'list', 'delete', 'binding'],
+                        description: 'set: create/overwrite | get: read one | list: all keys | delete: remove | binding: full text of all always-guidelines that apply here (global, parent projects, project); read-only, no session side effects, without path only the global ones',
                     },
                     key: {
                         type: 'string',
@@ -823,7 +823,7 @@ export function registerTools(): Tool[] {
                         description: 'set only: true = delivered in full at session start, false = remove that mark',
                     },
                 },
-                required: ['path', 'action'],
+                required: ['action'],
             },
         },
         {
@@ -2049,14 +2049,7 @@ function handleSession(args: Record<string, unknown>): { content: Array<{ type: 
 
     // Guidelines marked "always": delivered in full, binding for this session.
     const always = loadAlwaysGuidelines(path);
-    if (always.global.length + always.project.length > 0) {
-        message += '## 📌 Guidelines (binding)\n\n';
-        for (const g of always.global) message += `### ${g.key} (global)\n${g.value}\n\n`;
-        for (const g of always.project) message += `### ${g.key} (${g.from ? `parent project ${g.from}` : 'project'})\n${g.value}\n\n`;
-        if (always.chars > ALWAYS_BUDGET) {
-            message += `⚠️ These guidelines are ${always.chars} characters (budget ${ALWAYS_BUDGET}). Shorten them or unmark some with always=false.\n\n`;
-        }
-    }
+    message += formatAlwaysGuidelines(always);
     if (always.otherProjectKeys.length > 0) {
         message += `More project guidelines (read with ${TOOL_PREFIX}guideline get): ${always.otherProjectKeys.join(', ')}\n\n`;
     }
@@ -2787,8 +2780,12 @@ function handleGlobalGuideline(args: Record<string, unknown>): { content: Array<
 function handleProjectGuideline(args: Record<string, unknown>): { content: Array<{ type: string; text: string }> } {
     const path = args.path as string;
     const action = args.action as string;
-    if (!path) return { content: [{ type: 'text', text: 'Error: path parameter is required' }] };
     if (!action) return { content: [{ type: 'text', text: 'Error: action parameter is required' }] };
+    if (action === 'binding') {
+        const text = formatAlwaysGuidelines(loadAlwaysGuidelines(path || undefined));
+        return { content: [{ type: 'text', text: text.trimEnd() || 'No binding guidelines.' }] };
+    }
+    if (!path) return { content: [{ type: 'text', text: 'Error: path parameter is required' }] };
 
     const result = projectGuideline({
         path,
