@@ -377,7 +377,7 @@ Do I want to search code?
 - **`contains`**: Finds identifiers containing the term — `render` matches `preRenderSetup`
 - **`starts_with`**: Finds identifiers starting with the term — `Update` matches `UpdatePlayer`, `UpdateUI`
 
-### All Tools (32)
+### All Tools (33)
 
 | Category | Tools | Purpose |
 |----------|-------|---------|

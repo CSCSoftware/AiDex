@@ -456,6 +456,9 @@ function computeUpdateBanner(): string | null {
             const current = readPkgVersion();
             if (!current) return null;
             if (seen === current) return null;
+            // The release highlights of each version come with the per-project "Updated" section;
+            // this banner only announces the jump to 2.x (from 1.x or a fresh install).
+            if (seen && !seen.startsWith('1.')) return null;
             if (current.startsWith('2.')) {
                 return (
                     `🚀 AiDex ${current} — Major Release! ` +
