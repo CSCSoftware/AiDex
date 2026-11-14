@@ -2052,7 +2052,7 @@ function handleSession(args: Record<string, unknown>): { content: Array<{ type: 
     if (always.global.length + always.project.length > 0) {
         message += '## 📌 Guidelines (binding)\n\n';
         for (const g of always.global) message += `### ${g.key} (global)\n${g.value}\n\n`;
-        for (const g of always.project) message += `### ${g.key} (project)\n${g.value}\n\n`;
+        for (const g of always.project) message += `### ${g.key} (${g.from ? `parent project ${g.from}` : 'project'})\n${g.value}\n\n`;
         if (always.chars > ALWAYS_BUDGET) {
             message += `⚠️ These guidelines are ${always.chars} characters (budget ${ALWAYS_BUDGET}). Shorten them or unmark some with always=false.\n\n`;
         }

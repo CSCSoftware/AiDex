@@ -1017,6 +1017,8 @@ Guidelines for ONE project (the "project prompt"; key `main` by convention). Sto
 { "path": "/my/project", "action": "delete", "key": "old" }
 ```
 
+**Inheritance:** a project below another indexed project also receives that parent's `always` guidelines at session start (outermost first, labelled "parent project <folder>"). `list` and `get` show only the project's own guidelines.
+
 **Returns:** For `get`/`set` — key, text, always mark. For `list` — keys with ★always mark and size. `aidex_session` prints a "Guidelines (binding)" block with the full text of all `always` guidelines (global first, then project) and warns when their total exceeds 6000 characters.
 
 ---

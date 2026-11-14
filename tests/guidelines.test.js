@@ -61,6 +61,25 @@ describe('project guidelines', () => {
         expect(projectGuideline({ path: dir, action: 'get', key: 'main' }).guideline.always).toBe(false);
     });
 
+    test('a project inherits the "always" guidelines of parent projects, outermost first', () => {
+        const child = join(dir, 'sub', 'child');
+        mkdirSync(child, { recursive: true });
+        mkdirSync(join(child, '.aidex'));
+        const db = new Database(join(child, '.aidex', 'index.db'));
+        db.exec('CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT);');
+        db.close();
+
+        projectGuideline({ path: dir, action: 'set', key: 'family', value: 'Parent rule', always: true });
+        projectGuideline({ path: dir, action: 'set', key: 'quiet', value: 'Not delivered' });
+        projectGuideline({ path: child, action: 'set', key: 'main', value: 'Child rule', always: true });
+
+        const a = loadAlwaysGuidelines(child);
+        expect(a.project.map(g => g.key)).toEqual(['family', 'main']);
+        expect(a.project[0].from).toBeDefined();
+        expect(a.project[1].from).toBeUndefined();
+        expect(a.otherProjectKeys).toEqual([]);
+    });
+
     test('loadAlwaysGuidelines delivers project "always" texts, other keys by name', () => {
         projectGuideline({ path: dir, action: 'set', key: 'main', value: '  Rule A  ', always: true });
         projectGuideline({ path: dir, action: 'set', key: 'detail', value: 'Long detail' });

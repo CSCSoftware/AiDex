@@ -675,6 +675,8 @@ aidex_guideline({ path: "/my/project", action: "set", key: "main", value: "...",
 aidex_guideline({ path: "/my/project", action: "list" })                                        # keys, ★always marks, sizes
 ```
 
+A project inside another indexed project (for example `Synthesizers/Sygala/Orbion` below `Synthesizers`) also gets the `always` guidelines of its parent projects, outermost first, labelled "parent project ...". Put a rule that holds for a whole family of projects into the parent once.
+
 Keep "always" guidelines short: the session start warns when their total exceeds 6000 characters. Project guidelines live in `.aidex`, so they stay out of the repository unless you commit that folder.
 
 ### Health report

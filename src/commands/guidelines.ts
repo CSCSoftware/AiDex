@@ -7,7 +7,8 @@
  * Everything else is listed by key only.
  */
 
-import { withProjectDb } from './shared.js';
+import { basename, dirname, resolve } from 'path';
+import { withProjectDb, validateIndex } from './shared.js';
 import { getGlobalAlwaysKeys, parseKeyList, type GuidelineAction } from './global/global-guideline.js';
 import { openGlobalDatabase } from '../db/global-database.js';
 
@@ -93,7 +94,8 @@ export function projectGuideline(params: ProjectGuidelineParams): ProjectGuideli
 
 export interface AlwaysGuidelines {
     global: Array<{ key: string; value: string }>;
-    project: Array<{ key: string; value: string }>;
+    /** Guidelines of this project (no `from`) and of parent projects (`from` = folder name, outermost first). */
+    project: Array<{ key: string; value: string; from?: string }>;
     /** Project guidelines that are not "always" (listed by key only). */
     otherProjectKeys: string[];
     chars: number;
@@ -118,6 +120,19 @@ export function loadAlwaysGuidelines(projectPath: string): AlwaysGuidelines {
         }
     } catch {
         // global.db missing or unreadable: no global guidelines
+    }
+
+    // Parent projects first (outermost to innermost): a project inside another indexed project
+    // inherits the parent's "always" guidelines, like the CLAUDE.md chain.
+    const chain: string[] = [];
+    for (let dir = dirname(resolve(projectPath)); dirname(dir) !== dir; dir = dirname(dir)) {
+        if (validateIndex(dir)) chain.unshift(dir);
+    }
+    for (const dir of chain) {
+        const parent = projectGuideline({ path: dir, action: 'list' });
+        for (const g of parent.guidelines ?? []) {
+            if (g.always) out.project.push({ key: g.key, value: g.value.trim(), from: basename(dir) });
+        }
     }
 
     const res = projectGuideline({ path: projectPath, action: 'list' });
