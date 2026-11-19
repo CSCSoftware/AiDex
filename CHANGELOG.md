@@ -2,6 +2,16 @@
 
 All notable changes to AiDex will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **`aidex_changes`** — a compact, deterministic "work state since &lt;time&gt;" report for agents that compact their conversation: changed files (new / modified / deleted, newest first, with the time of the last change) and their structural delta (types and methods added, removed, signature changed), new or changed comment lines (text only, TODO/FIXME and doc comments first), task activity with shortened log entries, and whether the session note changed. Metadata only, never code; the text stays under ~6000 characters and says how much was omitted. Re-indexes files changed on disk first (`refresh`, default on). `format: "json"` returns the structured data.
+
+### Notes
+
+- Schema addition, backward compatible: new table `change_log` (created with `CREATE TABLE IF NOT EXISTS` on every writeable open, so existing indexes get it automatically). `aidex_update`, `aidex_remove`, incremental `aidex_init` and the deleted-file detection at session start record the structural delta there; entries older than 30 days are pruned. Writing the session note now also stores the metadata entry `session_note_updated_at`.
+
 ## [2.5.0] - 2026-11-14
 
 Guidelines per project, and guidelines that arrive on their own.

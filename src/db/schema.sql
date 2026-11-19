@@ -182,6 +182,24 @@ CREATE TABLE IF NOT EXISTS note_history (
 CREATE INDEX IF NOT EXISTS idx_note_history_created ON note_history(created_at);
 
 -- ------------------------------------------------------------
+-- Change Log (structural delta per re-index, read by aidex_changes)
+-- Metadata only (names/prototypes), pruned after 30 days.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS change_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    time INTEGER NOT NULL,
+    file TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    item_kind TEXT,
+    name TEXT,
+    signature TEXT,
+    old_signature TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_log_time ON change_log(time);
+CREATE INDEX IF NOT EXISTS idx_change_log_file ON change_log(file);
+
+-- ------------------------------------------------------------
 -- Metadaten
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS metadata (

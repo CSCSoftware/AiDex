@@ -5,7 +5,7 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, projectGuideline, loadAlwaysGuidelines, formatAlwaysGuidelines, health, formatHealthReport, log, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction, type LogAction, type LogLevel } from '../commands/index.js';
+import { init, query, signature, signatures, update, remove, summary, tree, describe, link, unlink, listLinks, scan, files, changes, note, getSessionNote, session, formatSessionTime, formatDuration, task, tasks, screenshot, listWindows, globalInit, globalStatus, globalQuery, globalSignatures, globalRefresh, globalGuideline, projectGuideline, loadAlwaysGuidelines, formatAlwaysGuidelines, health, formatHealthReport, log, type QueryMode, type TaskAction, type ScreenshotMode, type ScreenshotColors, type SignatureKind, type GuidelineAction, type LogAction, type LogLevel } from '../commands/index.js';
 import type { TaskRow } from '../db/index.js';
 import { openDatabase } from '../db/index.js';
 import { startViewer, stopViewer } from '../viewer/index.js';
@@ -358,6 +358,41 @@ export function registerTools(): Tool[] {
                     },
                 },
                 required: ['path'],
+            },
+        },
+        {
+            name: `${TOOL_PREFIX}changes`,
+            description: `Compact, deterministic "work state since <time>" report: changed files (new/modified/deleted, newest first, with time of last change), their structural delta (methods/types added, removed, signature changed), new or changed comment lines (text only, TODO/FIXME and doc comments first), task activity and whether the session note changed. Metadata only, never code. Re-indexes files changed on disk first. Use it before compacting a conversation to know where work left off.`,
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    path: {
+                        type: 'string',
+                        description: `Path to project with ${INDEX_DIR} directory`,
+                    },
+                    since: {
+                        type: 'string',
+                        description: 'Start of the period: "30m", "2h", "1d", "1w", ISO date or epoch milliseconds',
+                    },
+                    max_files: {
+                        type: 'number',
+                        description: 'Max files listed (default: 40)',
+                    },
+                    max_comments: {
+                        type: 'number',
+                        description: 'Max comment lines listed (default: 15)',
+                    },
+                    format: {
+                        type: 'string',
+                        enum: ['text', 'json'],
+                        description: 'text (default): compact markdown, under ~6000 chars. json: structured data',
+                    },
+                    refresh: {
+                        type: 'boolean',
+                        description: 'Re-index files changed on disk before reporting (default: true)',
+                    },
+                },
+                required: ['path', 'since'],
             },
         },
         {
@@ -1038,6 +1073,9 @@ export async function handleToolCall(
 
             case `${TOOL_PREFIX}files`:
                 return handleFiles(args);
+
+            case `${TOOL_PREFIX}changes`:
+                return handleChanges(args);
 
             case `${TOOL_PREFIX}note`:
                 return handleNote(args);
@@ -1836,6 +1874,30 @@ function handleScan(args: Record<string, unknown>): { content: Array<{ type: str
     return {
         content: [{ type: 'text', text: message.trimEnd() }],
     };
+}
+
+/**
+ * Handle changes ("work state since <time>")
+ */
+function handleChanges(args: Record<string, unknown>): { content: Array<{ type: string; text: string }> } {
+    const path = args.path as string;
+    const since = args.since;
+    if (!path || typeof since !== 'string' || !since) {
+        return { content: [{ type: 'text', text: 'Error: path and since parameters are required' }] };
+    }
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    const result = changes({
+        path,
+        since,
+        maxFiles: num(args.max_files),
+        maxComments: num(args.max_comments),
+        format: args.format === 'json' ? 'json' : 'text',
+        refresh: args.refresh !== false,
+    });
+    if (!result.success) {
+        return { content: [{ type: 'text', text: `Error: ${result.error}` }] };
+    }
+    return { content: [{ type: 'text', text: result.text ?? '' }] };
 }
 
 /**

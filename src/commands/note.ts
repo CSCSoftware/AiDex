@@ -50,6 +50,8 @@ export interface NoteResult {
 // ============================================================
 
 const NOTE_KEY = 'session_note';
+/** Timestamp (ms) of the last write/append/clear of the session note (read by aidex_changes). */
+export const NOTE_UPDATED_KEY = 'session_note_updated_at';
 
 // ============================================================
 // Implementation
@@ -131,6 +133,7 @@ export function note(params: NoteParams): NoteResult {
                 db.archiveNote(existing, params.summary);
             }
             db.deleteMetadata(NOTE_KEY);
+            db.setMetadata(NOTE_UPDATED_KEY, Date.now().toString());
             return {
                 success: true,
                 note: null,
@@ -156,6 +159,7 @@ export function note(params: NoteParams): NoteResult {
             }
 
             db.setMetadata(NOTE_KEY, finalNote);
+            db.setMetadata(NOTE_UPDATED_KEY, Date.now().toString());
 
             return {
                 success: true,

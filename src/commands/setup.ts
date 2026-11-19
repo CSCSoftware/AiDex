@@ -100,6 +100,7 @@ Do I want to search code?
 | "What changed recently?" | \`aidex_query term="X" modified_since="2h"\` |
 | "What changed before yesterday?" | \`aidex_query term="X" modified_before="1d"\` |
 | "What files changed today?" | \`aidex_files path="." modified_since="8h"\` |
+| "Where did I leave off?" (before compacting) | \`aidex_changes path="." since="2h"\` |
 | "Only search in src/server/" | \`aidex_query term="X" file_filter="src/server/**"\` |
 | "Only method definitions" | \`aidex_query term="X" type_filter=["method"]\` |
 | "Have I ever written X?" | \`aidex_global_query term="X" mode="contains"\` |
@@ -116,7 +117,7 @@ Do I want to search code?
 - **\`contains\`**: Finds identifiers containing the term — \`render\` matches \`preRenderSetup\`
 - **\`starts_with\`**: Finds identifiers starting with the term — \`Update\` matches \`UpdatePlayer\`, \`UpdateUI\`
 
-### All Tools (33)
+### All Tools (34)
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
@@ -126,7 +127,7 @@ Do I want to search code?
 | Cross-Project | \`aidex_link\`, \`aidex_unlink\`, \`aidex_links\`, \`aidex_scan\` | Link dependencies, discover projects |
 | Global Search | \`aidex_global_init\`, \`aidex_global_query\`, \`aidex_global_signatures\`, \`aidex_global_status\`, \`aidex_global_refresh\` | Search across ALL projects |
 | Guidelines | \`aidex_global_guideline\`, \`aidex_guideline\`, \`aidex_health\` | Persistent AI instructions & conventions (key-value, global and per project), read-only health report |
-| Sessions | \`aidex_session\`, \`aidex_note\` | Track sessions, leave notes (with searchable history & summaries) |
+| Sessions | \`aidex_session\`, \`aidex_note\`, \`aidex_changes\` | Track sessions, leave notes (with searchable history & summaries), compact "work state since" report |
 | Tasks | \`aidex_task\`, \`aidex_tasks\` | Built-in backlog with priorities, tags, summaries, auto-logged history |
 | Log Hub | \`aidex_log\` | Universal log receiver — any program sends logs via HTTP, AI queries them, live in Viewer |
 | Screenshots | \`aidex_screenshot\`, \`aidex_windows\` | Cross-platform screen capture with LLM optimization (scale + color reduction) |

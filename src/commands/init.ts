@@ -73,6 +73,7 @@ export function shortHash(content: Buffer | string): string {
 }
 
 import { createDatabase, createQueries, type AiDexDatabase, type Queries } from '../db/index.js';
+import { recordFileReindex, type StructureSnapshot } from '../db/change-log.js';
 import { extract, getSupportedExtensions } from '../parser/index.js';
 import { globalDbExists, readProjectStats, openGlobalDatabase } from '../db/global-database.js';
 
@@ -584,8 +585,11 @@ function indexFile(
     // Calculate hash
     const hash = shortHash(content);
 
-    // In incremental mode, skip unchanged files
+    // In incremental mode, skip unchanged files.
+    // oldStructure stays undefined for a full (non-incremental) index: nothing is logged then.
+    let oldStructure: StructureSnapshot | null | undefined;
     if (incremental) {
+        oldStructure = null;
         const existingFile = queries.getFileByPath(relativePath);
         if (existingFile && existingFile.hash === hash) {
             return {
@@ -598,6 +602,10 @@ function indexFile(
         }
         // File changed - clear old data before re-indexing
         if (existingFile) {
+            oldStructure = {
+                methods: queries.getMethodsByFile(existingFile.id),
+                types: queries.getTypesByFile(existingFile.id),
+            };
             queries.clearFileData(existingFile.id);
             queries.deleteFile(existingFile.id);
         }
@@ -680,6 +688,11 @@ function indexFile(
     // Insert signature (header comments)
     if (extraction.headerComments.length > 0) {
         queries.insertSignature(fileId, extraction.headerComments.join('\n'));
+    }
+
+    // Structural delta for aidex_changes (incremental re-index only)
+    if (oldStructure !== undefined) {
+        recordFileReindex(db.getDb(), relativePath, oldStructure, extraction, now);
     }
 
     return {

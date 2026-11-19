@@ -28,6 +28,7 @@ Complete reference for all AiDex MCP tools.
   - [aidex_scan](#aidex_scan)
 - [Session Management](#session-management)
   - [aidex_session](#aidex_session)
+  - [aidex_changes](#aidex_changes) 🆕
   - [aidex_note](#aidex_note)
   - [aidex_settings](#aidex_settings) 🆕
   - [aidex_viewer](#aidex_viewer)
@@ -601,6 +602,68 @@ Found 3 file(s) changed outside of session:
 ## 📝 Session Note
 Test the new feature after restart
 ```
+
+---
+
+### aidex_changes
+
+Compact, deterministic "work state since &lt;time&gt;" report. Meant for agents that compact their conversation: call it before compacting and put the block into the fresh context so the agent knows where it left off. Metadata only — never code lines.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `path` | string | ✅ | Path to project with `.aidex` directory |
+| `since` | string | ✅ | Start of the period: `30m`, `2h`, `1d`, `1w`, ISO date or epoch milliseconds |
+| `max_files` | number | - | Max files listed (default: 40) |
+| `max_comments` | number | - | Max comment lines listed (default: 15) |
+| `format` | string | - | `text` (default, compact markdown, kept under ~6000 characters) or `json` (structured data) |
+| `refresh` | boolean | - | Re-index files changed on disk before reporting, like a new `aidex_session` does (default: `true`) |
+
+**What it reports:**
+
+- **Files** changed since then (`new`, `modified`, `deleted`), newest change first, each with the time of its last change, and the **structural delta**: types and methods added (`+`), removed (`-`) and signature changed (`~ old → new`). Net over the period: something added and removed again is not listed.
+- **New or changed comments** — comment lines whose content changed since then, text only (after the comment marker, trimmed, max 120 chars), TODO/FIXME/HACK/XXX/BUG first, then doc comments.
+- **Tasks** created, updated, completed or logged since then, with up to 3 log entries each (shortened to 200 chars).
+- **Session note** — whether it changed, and its first line.
+
+The text output stays under ~6000 characters; when entries are cut it says how many were omitted. Same state → same text.
+
+**Change log:** removed methods/types and old signatures cannot be read from the index after a re-index, so `aidex_update`, `aidex_remove`, incremental `aidex_init` and the session start record the structural delta of every re-indexed file in the table `change_log` (metadata only, pruned after 30 days). Changes made before this table existed only show up as file status without delta.
+
+**Example:**
+```json
+{ "path": ".", "since": "2h" }
+```
+
+**Output example:**
+```
+# Work state since 2026-11-19T13:20Z
+Files: 3 (shown: 1 new, 1 modified, 1 deleted) · comments: 3 · tasks: 1 · note: changed
+Note changed 2026-11-19T13:20Z: Next: implement fixed timestep, then remove render alpha hack.
+
+## Files (newest change first)
+- src/old.ts — deleted 2026-11-19T13:20Z
+  - export function legacy(): number
+- src/input.ts — new 2026-11-19T13:20Z
+  + export function readKeys(): string[]
+- src/engine.ts — modified 2026-11-19T13:20Z
+  + interface EngineOptions
+  ~ render(scale: number): void → render(scale: number, alpha: number): void
+  - tick(): void
+  + update(dt: number): void
+
+## New or changed comments
+- src/engine.ts:6 TODO: fixed timestep instead of variable dt
+- src/engine.ts:11 Settings for the engine.
+- src/input.ts:1 Keyboard input mapping
+
+## Tasks
+- #1 [backlog] Fixed timestep for Engine.update — created 2026-11-19T13:20Z
+  · 2026-11-19T13:20Z Variable dt causes jitter at low fps; switch to accumulator loop.
+```
+
+**Limits:** comment detection relies on the per-line timestamps of the index: a new block comment whose first line is just `/**` is only found when that opener line is new to the file. All times are UTC.
 
 ---
 
@@ -1372,6 +1435,8 @@ SQLite database at `.aidex/index.db`:
 | `metadata` | Key-value store (session times, notes, etc.) |
 | `tasks` | Project backlog tasks (priority, status, tags, summary, timestamps) |
 | `task_log` | Task history log (auto-logged status changes + manual notes) |
+| `note_history` | Archived session notes |
+| `change_log` | Structural delta per re-index (methods/types added, removed, signature changed; file added/deleted), read by `aidex_changes`, pruned after 30 days |
 
 ---
 

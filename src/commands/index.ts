@@ -11,6 +11,7 @@ export { summary, tree, describe, type SummaryParams, type SummaryResult, type T
 export { link, unlink, listLinks, type LinkParams, type LinkResult, type UnlinkParams, type UnlinkResult, type ListLinksParams, type ListLinksResult, type LinkedProject } from './link.js';
 export { scan, type ScanParams, type ScanResult, type IndexedProject } from './scan.js';
 export { files, type FilesParams, type FilesResult, type ProjectFile } from './files.js';
+export { changes, formatChangesText, type ChangesParams, type ChangesResult, type ChangesData, type ChangesFormat } from './changes.js';
 export { note, getSessionNote, type NoteParams, type NoteResult } from './note.js';
 export { session, updateSessionHeartbeat, getSessionInfo, formatSessionTime, formatDuration, type SessionParams, type SessionResult, type SessionInfo, type ChangedFile } from './session.js';
 export { task, tasks, type TaskParams, type TaskResult, type TasksParams, type TasksResult, type TaskAction } from './task.js';

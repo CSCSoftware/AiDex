@@ -33,7 +33,7 @@ AiDex is an MCP server that gives AI coding assistants a memory, semantic search
 
 </details>
 
-### What's Inside — 33 Tools in One Server
+### What's Inside — 34 Tools in One Server
 
 | Category | Tools | What it does |
 |----------|-------|--------------|
@@ -44,7 +44,7 @@ AiDex is an MCP server that gives AI coding assistants a memory, semantic search
 | **Cross-Project** | `link`, `unlink`, `links`, `scan` | Link dependencies, discover indexed projects |
 | **Global Search** | `global_init`, `global_query`, `global_signatures`, `global_status`, `global_refresh` | Search identifiers across ALL your projects — "Have I ever written X?" |
 | **Guidelines** | `global_guideline`, `guideline`, `health` | Persistent AI instructions & coding conventions — global and per project, optionally delivered automatically at session start |
-| **Sessions** | `session`, `note` | Track sessions, detect external changes, leave notes for next session (with searchable history) |
+| **Sessions** | `session`, `note`, `changes` | Track sessions, detect external changes, leave notes for next session (with searchable history), compact "work state since" report |
 | **Task Backlog** | `task`, `tasks` | Built-in task management with priorities, tags, auto-logged history, and **scheduled/recurring tasks** |
 | **Log Hub** | `log` | Universal log receiver — any program sends logs via HTTP, queryable by the AI, live in Viewer |
 | **Screenshots** | `screenshot`, `windows` | Cross-platform screen capture with LLM optimization — scale + color reduction saves up to 95% tokens |
@@ -367,6 +367,7 @@ Do I want to search code?
 | "Project overview" | `aidex_summary` + `aidex_tree` |
 | "What changed recently?" | `aidex_query term="X" modified_since="2h"` |
 | "What files changed today?" | `aidex_files path="." modified_since="8h"` |
+| "Where did I leave off?" (before compacting) | `aidex_changes path="." since="2h"` |
 | "Have I ever written X?" | `aidex_global_query term="X" mode="contains"` |
 | "Which project has class Y?" | `aidex_global_signatures term="Y" kind="class"` |
 | "All indexed projects?" | `aidex_global_status` |
@@ -387,7 +388,7 @@ Do I want to search code?
 | Cross-Project | `aidex_link`, `aidex_unlink`, `aidex_links`, `aidex_scan` | Link dependencies, discover projects |
 | Global Search | `aidex_global_init`, `aidex_global_query`, `aidex_global_signatures`, `aidex_global_status`, `aidex_global_refresh` | Search across ALL projects |
 | Guidelines | `aidex_global_guideline`, `aidex_guideline`, `aidex_health` | Persistent AI instructions & conventions (key-value, global and per project), plus a read-only health report |
-| Sessions | `aidex_session`, `aidex_note` | Track sessions, leave notes (with searchable history) |
+| Sessions | `aidex_session`, `aidex_note`, `aidex_changes` | Track sessions, leave notes (with searchable history), "work state since" report |
 | Tasks | `aidex_task`, `aidex_tasks` | Built-in backlog with priorities, tags, summaries, auto-logged history, scheduled/recurring tasks |
 | Log Hub | `aidex_log` | Universal log receiver — any program sends logs via HTTP, AI queries them, live in Viewer |
 | Screenshots | `aidex_screenshot`, `aidex_windows` | Screen capture with LLM optimization (scale + color reduction, no index needed) |
@@ -481,6 +482,7 @@ aidex_init({ path: "/path/to/your/project" })
 | `aidex_files` | List project files by type (code/config/doc/asset) |
 | `aidex_note` | Read/write session notes (persists between sessions) |
 | `aidex_session` | Start session, detect external changes, auto-reindex |
+| `aidex_changes` | Compact "work state since <time>": changed files with method/type delta, new comments, task activity, note change (metadata only) |
 | `aidex_viewer` | Open interactive project tree in browser |
 | `aidex_task` | Create, read, update, delete tasks with priority and tags |
 | `aidex_tasks` | List and filter tasks by status, priority, or tag |

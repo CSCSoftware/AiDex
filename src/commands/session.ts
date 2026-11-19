@@ -14,6 +14,7 @@ import Database from 'better-sqlite3';
 import { minimatch } from 'minimatch';
 import { createQueries } from '../db/index.js';
 import { openDatabase } from '../db/index.js';
+import { recordFileDeleted } from '../db/change-log.js';
 import { update } from './update.js';
 import { DEFAULT_EXCLUDE, readGitignore, shortHash } from './init.js';
 import { validateIndex, noIndexError, withProjectDb } from './shared.js';
@@ -142,6 +143,11 @@ export function session(params: SessionParams): SessionResult {
 
                     // Detect external changes
                     externalChanges = detectExternalChanges(projectPath, queries);
+                    for (const change of externalChanges) {
+                        if (change.reason === 'deleted') {
+                            recordFileDeleted(db.getDb(), change.path, now, true);
+                        }
+                    }
 
                     // Auto-reindex modified files
                     for (const change of externalChanges) {
@@ -279,7 +285,7 @@ export function getSessionInfo(projectPath: string): SessionInfo | null {
  * Detect files that were changed outside of the session.
  * Also cleans up excluded files (e.g. build/) that shouldn't be in the index.
  */
-function detectExternalChanges(projectPath: string, queries: ReturnType<typeof createQueries>): ChangedFile[] {
+export function detectExternalChanges(projectPath: string, queries: ReturnType<typeof createQueries>): ChangedFile[] {
     const changes: ChangedFile[] = [];
     const projectRoot = resolve(projectPath);
 

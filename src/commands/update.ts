@@ -14,6 +14,7 @@ import { extract } from '../parser/index.js';
 import { DEFAULT_EXCLUDE, readGitignore, shortHash } from './init.js';
 import { validateIndex, noIndexError, withDatabase, withProjectDb } from './shared.js';
 import { invalidateGlobalCache } from './global/global-query.js';
+import { recordFileReindex, recordFileDeleted, type StructureSnapshot } from '../db/change-log.js';
 
 async function notifyEmbeddingsFileUpdated(projectPath: string, filePath: string): Promise<void> {
     try {
@@ -174,12 +175,16 @@ export function update(params: UpdateParams): UpdateResult {
             let oldItemCount = 0;
             let oldMethodCount = 0;
             let oldTypeCount = 0;
+            let oldStructure: StructureSnapshot | null = null;
 
             if (existingFile) {
                 const oldOccurrences = queries.getOccurrencesByFile(existingFile.id);
                 oldItemCount = new Set(oldOccurrences.map(o => o.item_id)).size;
-                oldMethodCount = queries.getMethodsByFile(existingFile.id).length;
-                oldTypeCount = queries.getTypesByFile(existingFile.id).length;
+                const oldMethods = queries.getMethodsByFile(existingFile.id);
+                const oldTypes = queries.getTypesByFile(existingFile.id);
+                oldMethodCount = oldMethods.length;
+                oldTypeCount = oldTypes.length;
+                oldStructure = { methods: oldMethods, types: oldTypes };
             }
 
             // Split content into lines for hashing
@@ -288,6 +293,9 @@ export function update(params: UpdateParams): UpdateResult {
                 if (extraction.headerComments.length > 0) {
                     queries.insertSignature(fileId, extraction.headerComments.join('\n'));
                 }
+
+                // Structural delta for aidex_changes (best-effort, same transaction)
+                recordFileReindex(db.getDb(), relativePath, oldStructure, extraction, now);
             });
 
             // Cleanup unused items
@@ -360,10 +368,16 @@ export function remove(params: RemoveParams): RemoveResult {
                     };
                 }
 
+                const oldStructure: StructureSnapshot = {
+                    methods: queries.getMethodsByFile(existingFile.id),
+                    types: queries.getTypesByFile(existingFile.id),
+                };
+
                 // Delete file (CASCADE will handle related data)
                 db.transaction(() => {
                     queries.deleteFile(existingFile.id);
                     queries.deleteUnusedItems();
+                    recordFileDeleted(db.getDb(), relativePath, Date.now(), false, oldStructure);
                 });
 
                 // Fire-and-forget: drop embeddings for this file (no-op if not enabled).

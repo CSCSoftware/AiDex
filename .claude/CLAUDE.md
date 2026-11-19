@@ -28,6 +28,11 @@ node build/index.js              # MCP server (stdio); CLI: scan <path>, init <p
   `aidex_session` delivers all `always` texts under "Guidelines (binding)"; `action="binding"` returns that block read-only.
 - **`aidex_health`** (`src/commands/health.ts`): read-only, deterministic report on loaded instructions
   (guidelines, global/project CLAUDE.md, AGENTS.md, CLAUDE.local.md, big session notes). Never writes.
+- **`aidex_changes`** (`src/commands/changes.ts`): "work state since <time>" for context compaction. Reads
+  `files.last_indexed`, `lines.modified` (comment text read from disk, only after the comment marker),
+  tasks/task_log, note_history + metadata `session_note_updated_at`, and the `change_log` table
+  (`src/db/change-log.ts`): every re-index (update/remove/incremental init, session-detected deletes) diffs old vs.
+  new methods/types of the file in the same transaction. Text output deterministic, < 6000 chars.
 - Session notes and other key-value state: `metadata` table; overwriting a note archives the old one.
 - Ports: viewer 3333, global-init progress UI (SSE) 3334, LogHub 3335.
 

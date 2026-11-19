@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { ensureChangeLog } from './change-log.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -109,6 +110,9 @@ export class AiDexDatabase {
         if (noteHistoryCols.size > 0 && !noteHistoryCols.has('summary')) {
             this.db.exec('ALTER TABLE note_history ADD COLUMN summary TEXT');
         }
+
+        // change_log (structural delta per re-index, read by aidex_changes)
+        ensureChangeLog(this.db);
     }
 
     private tableColumns(table: string): Set<string> {
