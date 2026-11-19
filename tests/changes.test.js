@@ -88,6 +88,15 @@ describe('extractCommentLine', () => {
         expect(extractCommentLine(['#include <x.h>'], 0, '.c')).toBeNull();
     });
 
+    test('C# XML doc: markup-only lines are dropped, prose is kept', () => {
+        expect(extractCommentLine(['    /// <summary>'], 0, '.cs')).toBeNull();
+        expect(extractCommentLine(['    /// </remarks>'], 0, '.cs')).toBeNull();
+        expect(extractCommentLine([`/// <param name="raise">The session's <see cref="Raise"/> event.</param>`], 0, '.cs'))
+            .toEqual({ text: "The session's Raise event.", doc: true });
+        expect(extractCommentLine(['/// Takes <c>lock(record)</c> briefly, see <see cref="T:Foo.Bar"/>.'], 0, '.cs'))
+            .toEqual({ text: 'Takes lock(record) briefly, see Foo.Bar.', doc: true });
+    });
+
     test('long comments are cut to 120 chars', () => {
         const r = extractCommentLine(['// ' + 'x'.repeat(300)], 0, '.ts');
         expect(r.text.length).toBe(120);

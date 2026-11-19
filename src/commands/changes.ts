@@ -169,6 +169,8 @@ export function extractCommentLine(
         .trim();
 
     let text = clean(rest);
+    // C#/F# XML doc comments: keep the prose, drop the markup; a line that is only markup (<summary>) is no comment.
+    if (rest.startsWith('///')) text = stripXmlDoc(text);
     if (!text && isBlockOpener) {
         const closer = marker === '/*' ? '*/' : marker === '<!--' ? '-->' : marker;
         for (let i = index + 1; i < Math.min(lines.length, index + 6); i++) {
@@ -185,6 +187,15 @@ export function extractCommentLine(
     }
     if (!text) return null;
     return { text: cut(text, COMMENT_MAX_CHARS), doc };
+}
+
+/** Removes XML doc markup: <see cref="X"/> and <paramref name="x"/> become X/x, other tags vanish. */
+export function stripXmlDoc(text: string): string {
+    return text
+        .replace(/<(?:see|seealso|paramref|typeparamref)\s+(?:cref|name|langword|href)="([^"]*)"\s*\/>/g, (_, v: string) => v.replace(/^[A-Z]:/, ''))
+        .replace(/<\/?[a-zA-Z][\w]*(?:\s+[\w:-]+="[^"]*")*\s*\/?>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function commentPriority(c: { text: string; doc: boolean }): number {
